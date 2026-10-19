@@ -20,12 +20,26 @@ struct CookieEaterApp: App {
         .defaultSize(width: 1080, height: 700)
         .defaultLaunchBehavior(model.settings.showWindowAtLaunch ? .presented : .suppressed)
         .commands {
-            CommandGroup(after: .appInfo) {
+            CommandGroup(replacing: .appInfo) {
+                AboutCommand()
                 if Self.checksForUpdates {
                     Button("Check for Updates…") { updater.checkForUpdates(nil) }
                 }
             }
         }
+
+        Window("About CookieEater", id: WindowID.about) {
+            AboutView()
+                .toolbar(removing: .title)
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                .containerBackground(.thickMaterial, for: .window)
+                .windowMinimizeBehavior(.disabled)
+        }
+        .windowResizability(.contentSize)
+        .windowBackgroundDragBehavior(.enabled)
+        .restorationBehavior(.disabled)
+        .defaultLaunchBehavior(.suppressed)
+        .commandsRemoved()
 
         MenuBarExtra("CookieEater", image: "MenuBarIcon") {
             MenuBarContent(checkForUpdates: Self.checksForUpdates ? { updater.checkForUpdates(nil) } : nil)
@@ -36,6 +50,7 @@ struct CookieEaterApp: App {
 
 enum WindowID {
     static let main = "main"
+    static let about = "about"
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {

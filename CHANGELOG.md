@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3
+
+- Nicer looking about panel
+
 ## 1.0.2
 
 - Use fixed width for the browser statistics
