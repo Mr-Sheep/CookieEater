@@ -88,11 +88,12 @@ struct CookiesView: View {
                               clearCache: { pendingAction = .clearCache })
                 Divider()
             }
+            // Without a flexible width, the split view starts at the tables' ideal width.
             VSplitView {
                 sitesTable(groups)
-                    .frame(minHeight: 180, idealHeight: 340)
+                    .frame(maxWidth: .infinity, minHeight: 180, idealHeight: 340, maxHeight: .infinity)
                 cookieTable(cookies.filter { selectedSites.contains($0.site) })
-                    .frame(minHeight: 120, idealHeight: 200)
+                    .frame(maxWidth: .infinity, minHeight: 120, idealHeight: 200, maxHeight: .infinity)
             }
             Divider()
             actionBar(siteCount: groups.count, cookieCount: cookies.count)
