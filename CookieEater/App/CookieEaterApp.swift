@@ -15,7 +15,7 @@ struct CookieEaterApp: App {
         Window("CookieEater", id: WindowID.main) {
             ContentView(updater: Self.checksForUpdates ? updater.updater : nil)
                 .environment(model)
-                .frame(minWidth: 860, minHeight: 520)
+                .frame(minWidth: 1080, minHeight: 520)
         }
         .defaultSize(width: 1080, height: 700)
         .defaultLaunchBehavior(model.settings.showWindowAtLaunch ? .presented : .suppressed)

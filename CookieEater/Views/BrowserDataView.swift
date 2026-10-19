@@ -444,9 +444,16 @@ private struct BrowserHeader: View {
                             .foregroundStyle(.green)
                     }
                 }
-                Text(DataKind.allCases.map(statistic).joined(separator: " · "))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    ForEach(DataKind.allCases, id: \.self) { kind in
+                        Text(statistic(for: kind))
+                            .frame(width: 110, alignment: .leading)
+                    }
+                }
+                .font(.callout)
+                .monospacedDigit()
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
             }
             Spacer()
             if browser.profiles.count > 1 {
@@ -478,20 +485,25 @@ private struct BrowserHeader: View {
         return "\(browser.name) (\(profile.name))"
     }
 
+    /// "Entries: 1,234", "Cache: 22.5 MB", "Cookies: locked".
     private func statistic(for kind: DataKind) -> String {
+        "\(kind == .history ? "Entries" : kind.title): \(statisticValue(for: kind))"
+    }
+
+    private func statisticValue(for kind: DataKind) -> String {
         if model.isBlocked(kind, browserID: browser.id) {
-            return "\(kind.title): no access"
+            return "no access"
         }
         if model.isLocked(kind, browserID: browser.id) {
-            return "\(kind.title): read when it quits"
+            return "locked"
         }
         if model.loadingKinds.contains(kind) {
-            return "Reading \(kind.title.lowercased())…"
+            return "…"
         }
         let items = model.items(kind).filter { $0.browserID == browser.id && (profileID == nil || $0.profileID == profileID) }
         switch kind {
-        case .cache: return "\(items.reduce(0) { $0 + $1.size }.formatted(.byteCount(style: .file))) of cache"
-        case .history, .cookies: return kind.count(items.count)
+        case .cache: return items.reduce(0) { $0 + $1.size }.formatted(.byteCount(style: .file))
+        case .history, .cookies: return items.count.formatted()
         }
     }
 }
