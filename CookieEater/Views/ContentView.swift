@@ -1,8 +1,10 @@
+import Sparkle
 import SwiftUI
 
 enum SidebarItem: Hashable {
     case allBrowsers
     case browser(String)
+    case general
     case browsers
     case exceptions
     case automation
@@ -11,6 +13,8 @@ enum SidebarItem: Hashable {
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
+    /// Nil in builds that don't look for updates.
+    let updater: SPUUpdater?
     @State private var selection: SidebarItem? = .allBrowsers
     /// Shared by every browser, so switching browsers keeps the tab.
     @State private var dataKind = DataKind.cookies
@@ -27,6 +31,8 @@ struct ContentView: View {
                     }
                 }
                 Section("Settings") {
+                    Label("General", systemImage: "gearshape")
+                        .tag(SidebarItem.general)
                     Label("Browsers", systemImage: "macwindow.on.rectangle")
                         .tag(SidebarItem.browsers)
                     Label("Exceptions", systemImage: "checkmark.shield")
@@ -79,6 +85,8 @@ struct ContentView: View {
         case .browser(let id):
             BrowserDataView(scope: .browser(id), kind: $dataKind)
                 .id(id)
+        case .general:
+            GeneralView(updater: updater)
         case .browsers:
             BrowsersView()
         case .exceptions:

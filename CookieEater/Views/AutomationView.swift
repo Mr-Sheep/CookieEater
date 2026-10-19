@@ -1,4 +1,3 @@
-import ServiceManagement
 import SwiftUI
 
 struct AutomationView: View {
@@ -87,20 +86,6 @@ struct AutomationView: View {
                 Text("Auto Sync")
             } footer: {
                 Text("Turn on auto sync for a browser, or for all browsers, with the button in the toolbar above their data. It only runs while this window is open.")
-            }
-
-            Section {
-                Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
-                if model.loginItemNeedsApproval {
-                    LabeledContent("Allow CookieEater in Login Items to finish turning this on.") {
-                        Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
-                    }
-                }
-                Toggle("Open this window at launch", isOn: $model.settings.showWindowAtLaunch)
-            } header: {
-                Text("General")
-            } footer: {
-                Text("CookieEater keeps running in the menu bar after you close this window.")
             }
 
             Section {

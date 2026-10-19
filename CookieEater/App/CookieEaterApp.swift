@@ -13,7 +13,7 @@ struct CookieEaterApp: App {
 
     var body: some Scene {
         Window("CookieEater", id: WindowID.main) {
-            ContentView()
+            ContentView(updater: Self.checksForUpdates ? updater.updater : nil)
                 .environment(model)
                 .frame(minWidth: 860, minHeight: 520)
         }
