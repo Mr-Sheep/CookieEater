@@ -4,9 +4,8 @@ import Foundation
 struct CleanupRequest: Sendable {
     let browser: BrowserDefinition
     let profiles: [BrowserProfile]
-    var removeCookie: (@Sendable (BrowserCookie) -> Bool)?
-    var clearHistory = false
-    var clearCache = false
+    /// Which items to remove, for each kind of data to clean. Kinds that are missing are left alone.
+    var removals: [DataKind: @Sendable (any SiteData) -> Bool] = [:]
 }
 
 struct CleanupReport: Sendable {
@@ -46,27 +45,59 @@ actor CleanupWorker {
             }
         }
 
-        if let removeCookie = request.removeCookie {
+        if let shouldRemove = request.removals[.cookies] {
             for profile in request.profiles where profile.cookiesFile != nil {
                 attempt("Cookies", profile: profile) {
-                    report.cookiesRemoved += try engine.removeCookies(in: profile, where: removeCookie)
+                    report.cookiesRemoved += try engine.removeCookies(in: profile) { shouldRemove($0) }
                 }
             }
         }
-        if request.clearHistory {
+        if let shouldRemove = request.removals[.history] {
             for profile in request.profiles where profile.historyFile != nil {
                 attempt("History", profile: profile) {
-                    report.historyItemsRemoved += try engine.clearHistory(in: profile)
+                    report.historyItemsRemoved += try engine.removeHistory(in: profile) { shouldRemove($0) }
                 }
             }
         }
-        if request.clearCache {
-            for directory in engine.cacheDirectories(for: request.profiles) where FileTools.exists(directory) {
-                attempt("Cache") {
-                    report.cacheBytesFreed += try FileTools.removeContents(of: directory)
-                }
+        if let shouldRemove = request.removals[.cache] {
+            attempt("Cache") {
+                report.cacheBytesFreed += try removeCache(of: engine, profiles: request.profiles, where: shouldRemove)
             }
         }
         return report
+    }
+
+    /// Removing every entry empties the cache folders, including files that couldn't be listed.
+    private func removeCache(of engine: any BrowserEngine, profiles: [BrowserProfile],
+                             where shouldRemove: (any SiteData) -> Bool) throws -> Int64 {
+        let entries = engine.cache(for: profiles)
+        let removed = entries.filter { shouldRemove($0) }
+        var freed: Int64 = 0
+        var firstError: Error?
+        if removed.count == entries.count {
+            for directory in engine.cacheDirectories(for: profiles) where FileTools.exists(directory) {
+                do {
+                    freed += try FileTools.removeContents(of: directory)
+                } catch {
+                    firstError = firstError ?? error
+                }
+            }
+        } else {
+            for entry in removed {
+                do {
+                    for file in entry.files {
+                        try FileTools.removeItemIfPresent(file)
+                    }
+                    freed += entry.size
+                } catch {
+                    firstError = firstError ?? error
+                }
+            }
+            for index in Set(removed.compactMap(\.storeIndex)) {
+                try? FileTools.removeItemIfPresent(index)
+            }
+        }
+        if let firstError { throw firstError }
+        return freed
     }
 }

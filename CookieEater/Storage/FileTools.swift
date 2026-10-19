@@ -27,6 +27,65 @@ enum FileTools {
         return size > 0
     }
 
+    static func children(of directory: URL) -> [URL] {
+        (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+    }
+
+    static func fileSize(_ url: URL) -> Int? {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+    }
+
+    static func modificationDate(_ url: URL) -> Date? {
+        (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    /// Folders named `name` inside `roots`, at most `depth` levels down. Their contents aren't searched.
+    static func folders(named name: String, in roots: [URL], depth: Int) -> [URL] {
+        var found: [URL] = []
+        for root in roots {
+            guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey]) else {
+                continue
+            }
+            for case let url as URL in enumerator {
+                guard (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
+                if url.lastPathComponent == name {
+                    found.append(url)
+                    enumerator.skipDescendants()
+                } else if enumerator.level >= depth {
+                    enumerator.skipDescendants()
+                }
+            }
+        }
+        return found
+    }
+
+    /// What `roots` hold outside the folders in `stores`. A root without a store counts as a whole (its contents
+    /// are listed, so the folder itself is kept); otherwise each of its items outside the stores counts separately.
+    static func items(in roots: [URL], outside stores: [URL]) -> [(location: URL, files: [URL])] {
+        func isInStore(_ url: URL) -> Bool { stores.contains { isItem(url, inside: $0) } }
+        func holdsStore(_ url: URL) -> Bool { stores.contains { isItem($0, inside: url) } }
+        var items: [(location: URL, files: [URL])] = []
+        func visit(_ url: URL) {
+            guard !isInStore(url) else { return }
+            if holdsStore(url) {
+                children(of: url).forEach(visit)
+            } else {
+                items.append((url, [url]))
+            }
+        }
+        for root in roots where !isInStore(root) {
+            if holdsStore(root) {
+                children(of: root).forEach(visit)
+            } else {
+                let contents = children(of: root)
+                if !contents.isEmpty {
+                    items.append((root, contents))
+                }
+            }
+        }
+        return items
+    }
+
     static func subdirectories(of directory: URL) -> [URL] {
         let children = (try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: [.isDirectoryKey])) ?? []

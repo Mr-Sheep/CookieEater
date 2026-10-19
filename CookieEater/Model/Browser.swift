@@ -7,11 +7,28 @@ enum BrowserFamily: String, Sendable {
     case firefox
 }
 
-/// The kinds of browsing data CookieEater removes.
+/// The kinds of browsing data CookieEater removes, in the order they are shown.
 enum DataKind: CaseIterable, Sendable {
-    case cookies
     case history
     case cache
+    case cookies
+
+    var title: String {
+        switch self {
+        case .history: "History"
+        case .cache: "Cache"
+        case .cookies: "Cookies"
+        }
+    }
+
+    /// "1 page", "3 cache entries", "12 cookies".
+    func count(_ count: Int) -> String {
+        switch self {
+        case .history: count == 1 ? "1 page" : "\(count.formatted()) pages"
+        case .cache: count == 1 ? "1 cache entry" : "\(count.formatted()) cache entries"
+        case .cookies: count == 1 ? "1 cookie" : "\(count.formatted()) cookies"
+        }
+    }
 }
 
 /// A browser CookieEater knows how to clean, and where it keeps its data.

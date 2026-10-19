@@ -16,9 +16,17 @@ final class SQLiteDatabase {
             sqlite3_column_int64(statement, column)
         }
 
+        func double(_ column: Int32) -> Double {
+            sqlite3_column_double(statement, column)
+        }
+
         func string(_ column: Int32) -> String {
             guard let text = sqlite3_column_text(statement, column) else { return "" }
             return String(cString: text)
+        }
+
+        func isNull(_ column: Int32) -> Bool {
+            sqlite3_column_type(statement, column) == SQLITE_NULL
         }
     }
 
@@ -79,6 +87,24 @@ final class SQLiteDatabase {
             guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError }
             sqlite3_reset(statement)
         }
+    }
+
+    func run(_ sql: String, binding values: [String]) throws {
+        let statement = try prepare(sql)
+        defer { sqlite3_finalize(statement) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        for value in values {
+            sqlite3_bind_text(statement, 1, value, -1, transient)
+            guard sqlite3_step(statement) == SQLITE_DONE else { throw lastError }
+            sqlite3_reset(statement)
+        }
+    }
+
+    /// Deletes the rows whose `column` is in `subquery`. Does nothing if the table or column doesn't exist,
+    /// since browsers add and drop tables between versions.
+    func deleteRows(from table: String, where column: String, in subquery: String) throws {
+        guard try tableExists(table), try columns(of: table).contains(column) else { return }
+        try execute("DELETE FROM \(table) WHERE \(column) IN (\(subquery))")
     }
 
     func transaction(_ body: () throws -> Void) throws {

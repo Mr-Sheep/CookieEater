@@ -20,6 +20,9 @@ struct ChromiumEngine: BrowserEngine {
         "Network Action Predictor", "Network Action Predictor-journal", "History Provider Cache",
     ]
 
+    /// Databases derived from history that also hold entries for other pages, with the table listing pages by URL.
+    private static let historyURLTables = [("Shortcuts", "omni_box_shortcuts"), ("Network Action Predictor", "network_action_predictor")]
+
     private static let profileCacheFolders = ["Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache"]
     private static let sharedCacheFolders = ["GrShaderCache", "ShaderCache", "GraphiteDawnCache", "GPUPersistentCache"]
 
@@ -72,16 +75,99 @@ struct ChromiumEngine: BrowserEngine {
         return rowIDs.count
     }
 
-    func historyCount(in profile: BrowserProfile) throws -> Int {
-        guard let url = profile.historyFile else { return 0 }
-        return try FileTools.readSQLiteSnapshot(url) { try $0.scalarInt("SELECT count(*) FROM urls") }
+    func history(in profile: BrowserProfile) throws -> [HistoryEntry] {
+        guard let url = profile.historyFile else { return [] }
+        return try FileTools.readSQLiteSnapshot(url) { db in
+            var pages: [HistoryEntry] = []
+            try forEachPage(in: db, profile: profile) { _, page in pages.append(page) }
+            return pages
+        }
     }
 
-    func clearHistory(in profile: BrowserProfile) throws -> Int {
+    func removeHistory(in profile: BrowserProfile, where shouldRemove: (HistoryEntry) -> Bool) throws -> Int {
         guard let url = profile.historyFile else { return 0 }
         let db = try SQLiteDatabase(url: url)
-        let removed = try db.scalarInt("SELECT count(*) FROM urls")
+        var ids: [Int64] = []
+        var urls: [String] = []
+        var total = 0
+        try forEachPage(in: db, profile: profile) { id, page in
+            total += 1
+            if shouldRemove(page) {
+                ids.append(id)
+                urls.append(page.url)
+            }
+        }
         try db.execute("PRAGMA secure_delete = ON")
+        if ids.count == total {
+            try clearAllHistory(in: db, profile: profile)
+            return total
+        }
+        guard !ids.isEmpty else { return 0 }
+
+        try db.transaction {
+            try db.execute("CREATE TEMP TABLE removed_urls (id INTEGER PRIMARY KEY)")
+            try db.run("INSERT INTO removed_urls VALUES (?)", binding: ids)
+            try db.execute("CREATE TEMP TABLE removed_visits AS SELECT id FROM visits WHERE url IN (SELECT id FROM removed_urls)")
+            let visits = "SELECT id FROM removed_visits"
+            for (table, column) in [("visit_source", "id"), ("content_annotations", "visit_id"), ("context_annotations", "visit_id"),
+                                    ("clusters_and_visits", "visit_id"), ("cluster_visit_duplicates", "visit_id"), ("visits", "id")] {
+                try db.deleteRows(from: table, where: column, in: visits)
+            }
+            let pages = "SELECT id FROM removed_urls"
+            try db.deleteRows(from: "segment_usage", where: "segment_id", in: "SELECT id FROM segments WHERE url_id IN (\(pages))")
+            for (table, column) in [("segments", "url_id"), ("keyword_search_terms", "url_id"), ("visited_links", "link_url_id"),
+                                    ("urls", "id")] {
+                try db.deleteRows(from: table, where: column, in: pages)
+            }
+        }
+        // Chromium rebuilds these from what is left of the history.
+        for name in ["Visited Links", "Top Sites", "Top Sites-journal", "History Provider Cache"] {
+            try FileTools.removeItemIfPresent(profile.directory.appending(path: name))
+        }
+        for (file, table) in Self.historyURLTables {
+            let derivedFile = profile.directory.appending(path: file)
+            guard FileTools.exists(derivedFile) else { continue }
+            let derived = try SQLiteDatabase(url: derivedFile)
+            guard try derived.tableExists(table), try derived.columns(of: table).contains("url") else { continue }
+            try derived.execute("PRAGMA secure_delete = ON")
+            try derived.transaction {
+                try derived.run("DELETE FROM \(table) WHERE url = ?", binding: urls)
+            }
+        }
+        return ids.count
+    }
+
+    func cacheDirectories(for profiles: [BrowserProfile]) -> [URL] {
+        let perProfile = profiles.flatMap { profile in
+            Self.profileCacheFolders.map { profile.directory.appending(path: $0, directoryHint: .isDirectory) }
+        }
+        let shared = Self.sharedCacheFolders.map { browser.dataDirectory.appending(path: $0, directoryHint: .isDirectory) }
+        return browser.cacheDirectories + perProfile + shared
+    }
+
+    func cache(for profiles: [BrowserProfile]) -> [CacheEntry] {
+        let roots = cacheDirectories(for: profiles)
+        // The HTTP cache is in "<profile>/Cache/Cache_Data", usually under ~/Library/Caches.
+        let stores = FileTools.folders(named: "Cache_Data", in: roots, depth: 4)
+        var entries: [CacheEntry] = []
+        for store in stores {
+            let profileID = owner(of: store, among: profiles)
+            entries += CacheFormats.chromiumRecords(in: store).map {
+                CacheEntry(record: $0, browserID: browser.id, profileID: profileID,
+                           storeIndex: store.appending(path: "index-dir/the-real-index"))
+            }
+        }
+        return entries + looseCacheEntries(in: roots, outside: stores) { owner(of: $0, among: profiles) }
+    }
+
+    /// Per-profile caches sit in, or in a folder named like, the profile's folder. Others are shared.
+    private func owner(of url: URL, among profiles: [BrowserProfile]) -> String {
+        profiles.first { profile in
+            FileTools.isItem(url, inside: profile.directory) || url.pathComponents.contains(profile.directory.lastPathComponent)
+        }?.id ?? ""
+    }
+
+    private func clearAllHistory(in db: SQLiteDatabase, profile: BrowserProfile) throws {
         try db.transaction {
             for table in Self.historyTables {
                 if try db.tableExists(table) {
@@ -92,15 +178,15 @@ struct ChromiumEngine: BrowserEngine {
         for name in Self.historyFiles {
             try FileTools.removeItemIfPresent(profile.directory.appending(path: name))
         }
-        return removed
     }
 
-    func cacheDirectories(for profiles: [BrowserProfile]) -> [URL] {
-        let perProfile = profiles.flatMap { profile in
-            Self.profileCacheFolders.map { profile.directory.appending(path: $0, directoryHint: .isDirectory) }
+    private func forEachPage(in db: SQLiteDatabase, profile: BrowserProfile, _ body: (Int64, HistoryEntry) throws -> Void) throws {
+        try db.forEachRow("SELECT id, url, title, visit_count, last_visit_time FROM urls") { row in
+            let page = HistoryEntry(browserID: browser.id, profileID: profile.id, rowID: row.int64(0), url: row.string(1),
+                                    title: row.string(2), visitCount: Int(row.int64(3)),
+                                    lastVisit: Self.date(fromChromiumTime: row.int64(4)))
+            try body(row.int64(0), page)
         }
-        let shared = Self.sharedCacheFolders.map { browser.dataDirectory.appending(path: $0, directoryHint: .isDirectory) }
-        return browser.cacheDirectories + perProfile + shared
     }
 
     private func makeProfile(folder: String, name: String, directory: URL) -> BrowserProfile {
@@ -139,7 +225,7 @@ struct ChromiumEngine: BrowserEngine {
         }
     }
 
-    /// Chromium stores microseconds since 1601-01-01 UTC; 0 marks a session cookie.
+    /// Chromium stores microseconds since 1601-01-01 UTC; 0 marks a session cookie or a page never visited.
     private static func date(fromChromiumTime value: Int64) -> Date? {
         guard value > 0 else { return nil }
         return Date(timeIntervalSince1970: Double(value) / 1_000_000 - 11_644_473_600)

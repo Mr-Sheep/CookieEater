@@ -2,7 +2,7 @@ import AppKit
 import Observation
 import ServiceManagement
 
-enum CookieScope: Hashable {
+enum BrowserScope: Hashable {
     case allBrowsers
     case browser(String)
 }
@@ -28,9 +28,12 @@ final class AppModel {
     /// Every supported browser with data on this Mac, including excluded ones.
     private(set) var installedBrowsers: [InstalledBrowser] = []
     private(set) var cookies: [BrowserCookie] = []
-    private(set) var stats: [String: BrowserStats] = [:]
-    private(set) var problems: [String] = []
-    private(set) var isLoading = false
+    private(set) var history: [HistoryEntry] = []
+    private(set) var cache: [CacheEntry] = []
+    /// Data still being read. Cookies are read first, then history, then the cache.
+    private(set) var loadingKinds: Set<DataKind> = []
+    /// What couldn't be read, by kind of data.
+    private(set) var problems: [DataKind: [String]] = [:]
     private(set) var cleanupsInProgress = 0
     private(set) var runningBrowserIDs: Set<String> = []
     /// Browsers whose scheduled cleanup is waiting for them to quit.
@@ -65,7 +68,20 @@ final class AppModel {
 
     // MARK: - Queries
 
-    var exceptionList: ExceptionList { ExceptionList(settings.exceptions) }
+    var isLoading: Bool { !loadingKinds.isEmpty }
+
+    func exceptionList(for kind: DataKind) -> ExceptionList {
+        ExceptionList(settings[exceptionsFor: kind])
+    }
+
+    /// One kind of data, from every browser that isn't excluded.
+    func items(_ kind: DataKind) -> [any SiteData] {
+        switch kind {
+        case .history: history
+        case .cache: cache
+        case .cookies: cookies
+        }
+    }
 
     /// The browsers CookieEater shows and cleans: every installed browser that isn't excluded.
     var browsers: [InstalledBrowser] {
@@ -88,7 +104,7 @@ final class AppModel {
         browsers.first { $0.id == id }
     }
 
-    func browsers(in scope: CookieScope) -> [InstalledBrowser] {
+    func browsers(in scope: BrowserScope) -> [InstalledBrowser] {
         switch scope {
         case .allBrowsers: browsers
         case .browser(let id): browsers.filter { $0.id == id }
@@ -102,18 +118,12 @@ final class AppModel {
     }
 
     /// "Chrome", or "Chrome – Work" when the browser has several profiles.
-    func sourceName(for cookie: BrowserCookie) -> String {
-        guard let browser = browser(withID: cookie.browserID) else { return cookie.browserID }
-        guard browser.profiles.count > 1, let profile = browser.profiles.first(where: { $0.id == cookie.profileID }) else {
+    func sourceName(for item: some SiteData) -> String {
+        guard let browser = browser(withID: item.browserID) else { return item.browserID }
+        guard browser.profiles.count > 1, let profile = browser.profiles.first(where: { $0.id == item.profileID }) else {
             return browser.name
         }
         return "\(browser.name) – \(profile.name)"
-    }
-
-    func historyCount(browserID: String, profileID: String?) -> Int? {
-        guard let stats = stats[browserID] else { return nil }
-        if let profileID { return stats.historyItems[profileID] }
-        return stats.historyItems.isEmpty ? nil : stats.historyItems.values.reduce(0, +)
     }
 
     var nextScheduledRun: Date? {
@@ -139,21 +149,21 @@ final class AppModel {
         }
     }
 
-    func addExceptions(_ domains: some Sequence<String>) {
-        var exceptions = settings.exceptions
+    func addExceptions(_ domains: some Sequence<String>, for kind: DataKind) {
+        var exceptions = settings[exceptionsFor: kind]
         for domain in domains.map(Domain.normalize) where !domain.isEmpty && !exceptions.contains(domain) {
             exceptions.append(domain)
         }
-        settings.exceptions = exceptions.sorted()
+        settings[exceptionsFor: kind] = exceptions.sorted()
     }
 
-    func removeExceptions(_ domains: Set<String>) {
-        settings.exceptions.removeAll { domains.contains($0) }
+    func removeExceptions(_ domains: Set<String>, for kind: DataKind) {
+        settings[exceptionsFor: kind].removeAll { domains.contains($0) }
     }
 
     /// Removes the exceptions that cover any of the given sites.
-    func removeExceptions(coveringSites sites: Set<String>) {
-        settings.exceptions.removeAll { exception in
+    func removeExceptions(coveringSites sites: Set<String>, for kind: DataKind) {
+        settings[exceptionsFor: kind].removeAll { exception in
             sites.contains { $0 == exception || $0.hasSuffix("." + exception) }
         }
     }
@@ -162,7 +172,8 @@ final class AppModel {
         if excluded {
             settings.excludedBrowsers.insert(browserID)
             cookies.removeAll { $0.browserID == browserID }
-            stats[browserID] = nil
+            history.removeAll { $0.browserID == browserID }
+            cache.removeAll { $0.browserID == browserID }
             waitingBrowserIDs.remove(browserID)
         } else {
             settings.excludedBrowsers.remove(browserID)
@@ -258,58 +269,46 @@ final class AppModel {
     func reload() async {
         reloadGeneration += 1
         let generation = reloadGeneration
-        isLoading = true
+        loadingKinds = Set(DataKind.allCases)
         let excluded = settings.excludedBrowsers
         let scan = await Task.detached(priority: .userInitiated) { BrowserScan.perform(excluding: excluded) }.value
         guard generation == reloadGeneration else { return }
         installedBrowsers = scan.browsers
         cookies = scan.cookies
-        problems = scan.problems
+        problems[.cookies] = scan.problems
         refreshAccess()
-        isLoading = false
+        loadingKinds.remove(.cookies)
 
         let included = browsers
-        let stats = await Task.detached(priority: .utility) {
-            Dictionary(uniqueKeysWithValues: included.map { ($0.id, BrowserStats.collect(for: $0)) })
-        }.value
+        let history = await Task.detached(priority: .utility) { BrowserScan.history(of: included) }.value
         guard generation == reloadGeneration else { return }
-        self.stats = stats
+        self.history = history.pages
+        problems[.history] = history.problems
+        loadingKinds.remove(.history)
+
+        let cache = await Task.detached(priority: .utility) { BrowserScan.cache(of: included) }.value
+        guard generation == reloadGeneration else { return }
+        self.cache = cache
+        loadingKinds.remove(.cache)
     }
 
     // MARK: - Manual removal
 
-    func removeCookies(ofSites sites: Set<String>, scope: CookieScope, profileID: String?) {
-        let title = sites.count == 1 ? "Removed cookies for \(sites.first!)" : "Removed cookies for \(sites.count) sites"
-        submit(cookieRequests(scope: scope, profileID: profileID) { sites.contains($0.site) }, title: title)
+    func remove(_ kind: DataKind, sites: Set<String>, scope: BrowserScope, profileID: String?) {
+        let what = sites.count == 1 ? (sites.first!.isEmpty ? "files not tied to a site" : sites.first!) : "\(sites.count) sites"
+        submit(requests(kind, scope: scope, profileID: profileID) { sites.contains($0.site) },
+               title: "Removed \(kind.title.lowercased()) for \(what)")
     }
 
-    func removeCookies(withIDs ids: Set<String>) {
-        let profileIDs = Set(cookies.filter { ids.contains($0.id) }.map(\.profileID))
-        let requests = browsers.compactMap { browser -> CleanupRequest? in
-            let profiles = browser.profiles.filter { profileIDs.contains($0.id) }
-            guard !profiles.isEmpty else { return nil }
-            return CleanupRequest(browser: browser.definition, profiles: profiles, removeCookie: { ids.contains($0.id) })
-        }
-        submit(requests, title: ids.count == 1 ? "Removed 1 cookie" : "Removed \(ids.count) cookies")
+    func remove(_ kind: DataKind, itemIDs ids: Set<String>) {
+        submit(requests(kind, scope: .allBrowsers, profileID: nil) { ids.contains($0.id) },
+               title: "Removed \(kind.count(ids.count))")
     }
 
-    func removeCookiesNotExcepted(scope: CookieScope, profileID: String?) {
-        let exceptions = exceptionList
-        submit(cookieRequests(scope: scope, profileID: profileID) { !exceptions.covers($0.host) },
-               title: "Removed cookies not on the exception list")
-    }
-
-    func clearHistory(browserID: String, profileID: String?) {
-        guard let browser = browser(withID: browserID) else { return }
-        let profiles = browser.profiles.filter { profileID == nil || $0.id == profileID }
-        submit([CleanupRequest(browser: browser.definition, profiles: profiles, clearHistory: true)],
-               title: "Cleared \(browser.name) history")
-    }
-
-    func clearCache(browserID: String) {
-        guard let browser = browser(withID: browserID) else { return }
-        submit([CleanupRequest(browser: browser.definition, profiles: browser.profiles, clearCache: true)],
-               title: "Cleared \(browser.name) cache")
+    func removeNotExcepted(_ kind: DataKind, scope: BrowserScope, profileID: String?) {
+        let exceptions = exceptionList(for: kind)
+        submit(requests(kind, scope: scope, profileID: profileID) { !exceptions.covers($0.host) },
+               title: "Removed \(kind.title.lowercased()) not on the exception list")
     }
 
     func confirmQuit(_ prompt: QuitPrompt) {
@@ -325,16 +324,21 @@ final class AppModel {
         }
     }
 
-    /// Requests for the profiles that currently hold matching cookies, so no browser is quit for nothing.
-    private func cookieRequests(scope: CookieScope, profileID: String?,
-                                where shouldRemove: @escaping @Sendable (BrowserCookie) -> Bool) -> [CleanupRequest] {
-        let matchingProfileIDs = Set(cookies.filter(shouldRemove).map(\.profileID))
+    /// Requests for the browsers and profiles that currently hold matching items, so no browser is quit for nothing.
+    private func requests(_ kind: DataKind, scope: BrowserScope, profileID: String?,
+                          where matches: @escaping @Sendable (any SiteData) -> Bool) -> [CleanupRequest] {
+        let shouldRemove: @Sendable (any SiteData) -> Bool = { item in
+            (profileID == nil || item.profileID == profileID) && matches(item)
+        }
+        let matching = items(kind).filter(shouldRemove)
         return browsers(in: scope).compactMap { browser in
-            let profiles = browser.profiles.filter {
-                (profileID == nil || $0.id == profileID) && matchingProfileIDs.contains($0.id)
-            }
-            guard !profiles.isEmpty else { return nil }
-            return CleanupRequest(browser: browser.definition, profiles: profiles, removeCookie: shouldRemove)
+            let profileIDs = Set(matching.filter { $0.browserID == browser.id }.map(\.profileID))
+            guard !profileIDs.isEmpty else { return nil }
+            // The cache is always listed for every profile, so shared cache folders are attributed correctly.
+            let profiles = kind == .cache ? browser.profiles : browser.profiles.filter { profileIDs.contains($0.id) }
+            var request = CleanupRequest(browser: browser.definition, profiles: profiles)
+            request.removals[kind] = shouldRemove
+            return request
         }
     }
 
@@ -387,19 +391,14 @@ final class AppModel {
     }
 
     private func automaticRequest(for browser: InstalledBrowser) -> CleanupRequest? {
-        var options = settings.automation(for: browser.id)
+        let options = settings.automation(for: browser.id)
+        var request = CleanupRequest(browser: browser.definition, profiles: browser.profiles)
         // Data the user hasn't allowed CookieEater to open is skipped.
-        for kind in blockedData[browser.id] ?? [] {
-            options[kind] = false
+        for kind in DataKind.allCases where options[kind] && !isBlocked(kind, browserID: browser.id) {
+            let exceptions = exceptionList(for: kind)
+            request.removals[kind] = { !exceptions.covers($0.host) }
         }
-        guard options.isActive else { return nil }
-        var request = CleanupRequest(browser: browser.definition, profiles: browser.profiles,
-                                     clearHistory: options.history, clearCache: options.cache)
-        if options.cookies {
-            let exceptions = exceptionList
-            request.removeCookie = { !exceptions.covers($0.host) }
-        }
-        return request
+        return request.removals.isEmpty ? nil : request
     }
 
     /// Cleans every browser that has automatic cleanup turned on. Open browsers are cleaned once they quit.

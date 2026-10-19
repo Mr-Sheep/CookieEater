@@ -12,6 +12,8 @@ enum SidebarItem: Hashable {
 struct ContentView: View {
     @Environment(AppModel.self) private var model
     @State private var selection: SidebarItem? = .allBrowsers
+    /// Shared by every browser, so switching browsers keeps the tab.
+    @State private var dataKind = DataKind.cookies
 
     var body: some View {
         NavigationSplitView {
@@ -28,7 +30,7 @@ struct ContentView: View {
                     Label("Browsers", systemImage: "macwindow.on.rectangle")
                         .tag(SidebarItem.browsers)
                     Label("Exceptions", systemImage: "checkmark.shield")
-                        .badge(model.settings.exceptions.count)
+                        .badge(DataKind.allCases.reduce(0) { $0 + model.settings[exceptionsFor: $1].count })
                         .tag(SidebarItem.exceptions)
                     Label("Automation", systemImage: "clock.arrow.2.circlepath")
                         .tag(SidebarItem.automation)
@@ -68,9 +70,9 @@ struct ContentView: View {
     private var detail: some View {
         switch selection {
         case .allBrowsers, nil:
-            CookiesView(scope: .allBrowsers)
+            BrowserDataView(scope: .allBrowsers, kind: $dataKind)
         case .browser(let id):
-            CookiesView(scope: .browser(id))
+            BrowserDataView(scope: .browser(id), kind: $dataKind)
                 .id(id)
         case .browsers:
             BrowsersView()

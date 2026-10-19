@@ -49,6 +49,11 @@ enum Domain {
         "co.in", "com.br", "com.mx", "com.ar", "com.tr", "co.za", "co.il", "com.ua",
     ]
 
+    /// "https://www.Example.com/page" gives "www.example.com"; URLs without a host, such as file URLs, give "".
+    static func host(ofURL url: String) -> String {
+        URL(string: url)?.host(percentEncoded: false)?.lowercased() ?? ""
+    }
+
     static func host(fromCookieDomain domain: String) -> String {
         var host = domain.lowercased()
         while host.hasPrefix(".") { host.removeFirst() }
@@ -87,7 +92,7 @@ enum Domain {
     }
 }
 
-/// Domains whose cookies are never removed by automatic cleanups. An entry also covers its subdomains.
+/// Domains whose data is never removed by automatic cleanups. An entry also covers its subdomains.
 struct ExceptionList: Sendable {
     private let domains: [String]
 

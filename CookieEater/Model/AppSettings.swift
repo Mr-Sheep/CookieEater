@@ -65,7 +65,10 @@ struct CleanupSchedule: Codable, Equatable, Sendable {
 }
 
 struct AppSettings: Codable, Equatable, Sendable {
+    /// Sites whose cookies are kept. The name predates the history and cache lists.
     var exceptions: [String] = []
+    var historyExceptions: [String] = []
+    var cacheExceptions: [String] = []
     /// Keyed by `BrowserDefinition.id`.
     var automation: [String: BrowserAutomation] = [:]
     /// `BrowserDefinition.id`s of browsers CookieEater leaves alone: their data is neither read nor cleaned.
@@ -81,6 +84,8 @@ struct AppSettings: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = AppSettings()
         exceptions = try container.decodeIfPresent([String].self, forKey: .exceptions) ?? defaults.exceptions
+        historyExceptions = try container.decodeIfPresent([String].self, forKey: .historyExceptions) ?? defaults.historyExceptions
+        cacheExceptions = try container.decodeIfPresent([String].self, forKey: .cacheExceptions) ?? defaults.cacheExceptions
         automation = try container.decodeIfPresent([String: BrowserAutomation].self, forKey: .automation) ?? defaults.automation
         excludedBrowsers = try container.decodeIfPresent(Set<String>.self, forKey: .excludedBrowsers) ?? defaults.excludedBrowsers
         cleanOnQuit = try container.decodeIfPresent(Bool.self, forKey: .cleanOnQuit) ?? defaults.cleanOnQuit
@@ -91,6 +96,24 @@ struct AppSettings: Codable, Equatable, Sendable {
 
     func automation(for browserID: String) -> BrowserAutomation {
         automation[browserID] ?? BrowserAutomation()
+    }
+
+    /// The sites whose data of this kind is kept.
+    subscript(exceptionsFor kind: DataKind) -> [String] {
+        get {
+            switch kind {
+            case .cookies: exceptions
+            case .history: historyExceptions
+            case .cache: cacheExceptions
+            }
+        }
+        set {
+            switch kind {
+            case .cookies: exceptions = newValue
+            case .history: historyExceptions = newValue
+            case .cache: cacheExceptions = newValue
+            }
+        }
     }
 }
 

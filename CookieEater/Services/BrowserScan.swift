@@ -1,47 +1,59 @@
 import Foundation
 
-/// A read-only snapshot of every installed browser's profiles and cookies.
+/// Read-only snapshots of the installed browsers and their data.
 struct BrowserScan: Sendable {
     var browsers: [InstalledBrowser] = []
     var cookies: [BrowserCookie] = []
     var problems: [String] = []
 
-    /// Excluded browsers are still listed, but their cookies are not read.
+    /// Lists the installed browsers and reads their cookies. Excluded browsers are listed, but their cookies are
+    /// not read.
     static func perform(excluding excluded: Set<String> = []) -> BrowserScan {
         var scan = BrowserScan()
         for definition in BrowserDefinition.all where definition.isBuiltIn || FileTools.exists(definition.dataDirectory) {
             let engine = definition.makeEngine()
             let profiles = engine.profiles()
             guard !profiles.isEmpty else { continue }
-            scan.browsers.append(InstalledBrowser(definition: definition, profiles: profiles))
-            guard !excluded.contains(definition.id),
-                  !definition.protectedFolders(for: .cookies).contains(where: FileTools.isBlocked) else { continue }
+            let browser = InstalledBrowser(definition: definition, profiles: profiles)
+            scan.browsers.append(browser)
+            guard !excluded.contains(definition.id), isOpen(.cookies, of: browser) else { continue }
             for profile in profiles {
                 do {
                     scan.cookies += try engine.cookies(in: profile)
                 } catch {
-                    let label = profiles.count > 1 ? "\(definition.name) (\(profile.name))" : definition.name
-                    scan.problems.append("\(label): \(error.localizedDescription)")
+                    scan.problems.append("\(label(browser, profile)): \(error.localizedDescription)")
                 }
             }
         }
         return scan
     }
-}
 
-/// History and cache sizes shown for each browser.
-struct BrowserStats: Sendable {
-    /// History pages, keyed by profile ID. Profiles whose history couldn't be read are missing.
-    var historyItems: [String: Int] = [:]
-    var cacheBytes: Int64 = 0
-
-    static func collect(for browser: InstalledBrowser) -> BrowserStats {
-        let engine = browser.definition.makeEngine()
-        var stats = BrowserStats()
-        for profile in browser.profiles where profile.historyFile != nil {
-            stats.historyItems[profile.id] = try? engine.historyCount(in: profile)
+    static func history(of browsers: [InstalledBrowser]) -> (pages: [HistoryEntry], problems: [String]) {
+        var pages: [HistoryEntry] = []
+        var problems: [String] = []
+        for browser in browsers where isOpen(.history, of: browser) {
+            let engine = browser.definition.makeEngine()
+            for profile in browser.profiles where profile.historyFile != nil {
+                do {
+                    pages += try engine.history(in: profile)
+                } catch {
+                    problems.append("\(label(browser, profile)): \(error.localizedDescription)")
+                }
+            }
         }
-        stats.cacheBytes = engine.cacheDirectories(for: browser.profiles).reduce(0) { $0 + FileTools.allocatedSize(of: $1) }
-        return stats
+        return (pages, problems)
+    }
+
+    static func cache(of browsers: [InstalledBrowser]) -> [CacheEntry] {
+        browsers.filter { isOpen(.cache, of: $0) }.flatMap { $0.definition.makeEngine().cache(for: $0.profiles) }
+    }
+
+    /// Whether the user has allowed CookieEater to open this data, where macOS protects it.
+    private static func isOpen(_ kind: DataKind, of browser: InstalledBrowser) -> Bool {
+        !browser.definition.protectedFolders(for: kind).contains(where: FileTools.isBlocked)
+    }
+
+    private static func label(_ browser: InstalledBrowser, _ profile: BrowserProfile) -> String {
+        browser.profiles.count > 1 ? "\(browser.name) (\(profile.name))" : browser.name
     }
 }
