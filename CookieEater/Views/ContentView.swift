@@ -39,14 +39,8 @@ struct ContentView: View {
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 230)
         } detail: {
-            VStack(spacing: 0) {
-                if model.needsFullDiskAccess {
-                    FullDiskAccessBanner()
-                    Divider()
-                }
-                detail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .alert(model.quitPrompt.map { "Quit \($0.browserNames)?" } ?? "",
                isPresented: Binding(get: { model.quitPrompt != nil }, set: { if !$0 { model.quitPrompt = nil } }),
@@ -112,28 +106,5 @@ private struct BrowserSidebarRow: View {
                 model.setExcluded(true, browserID: browser.id)
             }
         }
-    }
-}
-
-private struct FullDiskAccessBanner: View {
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "lock.shield")
-                .font(.title2)
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Safari needs Full Disk Access")
-                    .font(.headline)
-                Text("macOS protects Safari’s cookies and history. Turn on CookieEater in Privacy & Security › Full Disk Access, then come back.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Open System Settings") {
-                NSWorkspace.shared.open(Permissions.fullDiskAccessSettingsURL)
-            }
-        }
-        .padding(12)
-        .background(.orange.opacity(0.08))
     }
 }

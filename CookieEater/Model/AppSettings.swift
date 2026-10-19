@@ -7,6 +7,23 @@ struct BrowserAutomation: Codable, Equatable, Sendable {
     var cache = false
 
     var isActive: Bool { cookies || history || cache }
+
+    subscript(kind: DataKind) -> Bool {
+        get {
+            switch kind {
+            case .cookies: cookies
+            case .history: history
+            case .cache: cache
+            }
+        }
+        set {
+            switch kind {
+            case .cookies: cookies = newValue
+            case .history: history = newValue
+            case .cache: cache = newValue
+            }
+        }
+    }
 }
 
 struct CleanupSchedule: Codable, Equatable, Sendable {

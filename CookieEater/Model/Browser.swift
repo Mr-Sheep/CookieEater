@@ -7,6 +7,13 @@ enum BrowserFamily: String, Sendable {
     case firefox
 }
 
+/// The kinds of browsing data CookieEater removes.
+enum DataKind: CaseIterable, Sendable {
+    case cookies
+    case history
+    case cache
+}
+
 /// A browser CookieEater knows how to clean, and where it keeps its data.
 struct BrowserDefinition: Identifiable, Hashable, Sendable {
     let id: String
@@ -29,6 +36,17 @@ struct BrowserDefinition: Identifiable, Hashable, Sendable {
 
     var cacheDirectories: [URL] {
         cachePaths.map { URL.homeDirectory.appending(path: $0, directoryHint: .isDirectory) }
+    }
+
+    /// Folders macOS protects, which CookieEater can open only once the user allows each one.
+    /// Only Safari's data is protected. Its data folder holds the cookies of every profile.
+    func protectedFolders(for kind: DataKind) -> [URL] {
+        guard family == .safari else { return [] }
+        switch kind {
+        case .cookies: return [dataDirectory]
+        case .history: return historyPath.map { [URL.homeDirectory.appending(path: $0, directoryHint: .isDirectory)] } ?? []
+        case .cache: return cacheDirectories
+        }
     }
 
     func makeEngine() -> any BrowserEngine {

@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-/// Persists settings and the activity log as JSON in ~/Library/Application Support/CookieEater.
+/// Persists settings, the activity log and folder bookmarks as JSON in ~/Library/Application Support/CookieEater.
 enum SettingsStore {
     private static let logger = Logger(subsystem: "dev.mrsheep.CookieEater", category: "SettingsStore")
 
@@ -11,6 +11,7 @@ enum SettingsStore {
 
     private static var settingsURL: URL { directory.appending(path: "Settings.json") }
     private static var activityURL: URL { directory.appending(path: "Activity.json") }
+    private static var folderBookmarksURL: URL { directory.appending(path: "FolderAccess.json") }
 
     static func loadSettings() -> AppSettings {
         load(from: settingsURL) ?? AppSettings()
@@ -26,6 +27,15 @@ enum SettingsStore {
 
     static func save(_ activity: [ActivityEntry]) {
         save(activity, to: activityURL)
+    }
+
+    /// Security-scoped bookmarks, keyed by folder path.
+    static func loadFolderBookmarks() -> [String: Data] {
+        load(from: folderBookmarksURL) ?? [:]
+    }
+
+    static func save(folderBookmarks: [String: Data]) {
+        save(folderBookmarks, to: folderBookmarksURL)
     }
 
     private static func load<Value: Decodable>(from url: URL) -> Value? {

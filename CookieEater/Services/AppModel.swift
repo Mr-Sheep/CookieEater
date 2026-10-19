@@ -36,7 +36,8 @@ final class AppModel {
     /// Browsers whose scheduled cleanup is waiting for them to quit.
     private(set) var waitingBrowserIDs: Set<String> = []
     private(set) var activity: [ActivityEntry]
-    private(set) var hasFullDiskAccess = true
+    /// Data macOS doesn't let CookieEater open yet, by browser ID. Only Safari's data is protected.
+    private(set) var blockedData: [String: Set<DataKind>] = [:]
     private(set) var launchAtLogin = false
     var quitPrompt: QuitPrompt?
 
@@ -47,6 +48,7 @@ final class AppModel {
     }
 
     @ObservationIgnored private let worker = CleanupWorker()
+    @ObservationIgnored private let folderAccess = FolderAccess()
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var scheduleTimer: Timer?
     @ObservationIgnored private var reloadGeneration = 0
@@ -74,9 +76,8 @@ final class AppModel {
         settings.excludedBrowsers.contains(browserID)
     }
 
-    /// Only Safari's data is protected, so the permission doesn't matter while Safari is excluded.
-    var needsFullDiskAccess: Bool {
-        !hasFullDiskAccess && browsers.contains { $0.definition.family == .safari }
+    func isBlocked(_ kind: DataKind, browserID: String) -> Bool {
+        blockedData[browserID]?.contains(kind) ?? false
     }
 
     func browser(withID id: String) -> InstalledBrowser? {
@@ -166,6 +167,47 @@ final class AppModel {
         Task { await reload() }
     }
 
+    // MARK: - Folder access
+
+    /// Asks the user to allow the protected folders that hold this kind of data, one open panel per folder.
+    /// Returns whether CookieEater can open all of them.
+    @discardableResult
+    func ensureAccess(_ kind: DataKind, for browser: InstalledBrowser) -> Bool {
+        let blocked = browser.definition.protectedFolders(for: kind).filter(FileTools.isBlocked)
+        guard !blocked.isEmpty else { return true }
+        let message = accessMessage(for: kind, browserName: browser.name)
+        let granted = blocked.allSatisfy { folderAccess.requestAccess(to: $0, message: message) }
+        if refreshAccess() {
+            Task { await reload() }
+        }
+        return granted
+    }
+
+    private func accessMessage(for kind: DataKind, browserName: String) -> String {
+        switch kind {
+        case .cookies: "Click Allow to let CookieEater read and remove \(browserName)’s cookies, which are kept in this folder."
+        case .history: "Click Allow to let CookieEater read and clear \(browserName)’s history."
+        case .cache: "Click Allow to let CookieEater measure and clear \(browserName)’s cache."
+        }
+    }
+
+    /// Returns whether anything changed.
+    @discardableResult
+    private func refreshAccess() -> Bool {
+        var blocked: [String: Set<DataKind>] = [:]
+        for browser in installedBrowsers {
+            let kinds = DataKind.allCases.filter { kind in
+                browser.definition.protectedFolders(for: kind).contains(where: FileTools.isBlocked)
+            }
+            if !kinds.isEmpty {
+                blocked[browser.id] = Set(kinds)
+            }
+        }
+        guard blocked != blockedData else { return false }
+        blockedData = blocked
+        return true
+    }
+
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
             if enabled {
@@ -200,7 +242,7 @@ final class AppModel {
         installedBrowsers = scan.browsers
         cookies = scan.cookies
         problems = scan.problems
-        hasFullDiskAccess = Permissions.hasFullDiskAccess()
+        refreshAccess()
         isLoading = false
 
         let included = browsers
@@ -322,7 +364,11 @@ final class AppModel {
     }
 
     private func automaticRequest(for browser: InstalledBrowser) -> CleanupRequest? {
-        let options = settings.automation(for: browser.id)
+        var options = settings.automation(for: browser.id)
+        // Data the user hasn't allowed CookieEater to open is skipped.
+        for kind in blockedData[browser.id] ?? [] {
+            options[kind] = false
+        }
         guard options.isActive else { return nil }
         var request = CleanupRequest(browser: browser.definition, profiles: browser.profiles,
                                      clearHistory: options.history, clearCache: options.cache)
@@ -420,12 +466,10 @@ final class AppModel {
         })
     }
 
-    /// The user may have just granted Full Disk Access or approved the login item in System Settings.
+    /// The user may have just approved the login item, or changed CookieEater's access, in System Settings.
     private func applicationDidBecomeActive() {
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        let hadAccess = hasFullDiskAccess
-        hasFullDiskAccess = Permissions.hasFullDiskAccess()
-        if hasFullDiskAccess && !hadAccess {
+        if refreshAccess() {
             Task { await reload() }
         }
     }

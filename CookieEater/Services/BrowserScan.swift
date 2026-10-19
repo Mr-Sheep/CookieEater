@@ -14,7 +14,8 @@ struct BrowserScan: Sendable {
             let profiles = engine.profiles()
             guard !profiles.isEmpty else { continue }
             scan.browsers.append(InstalledBrowser(definition: definition, profiles: profiles))
-            guard !excluded.contains(definition.id) else { continue }
+            guard !excluded.contains(definition.id),
+                  !definition.protectedFolders(for: .cookies).contains(where: FileTools.isBlocked) else { continue }
             for profile in profiles {
                 do {
                     scan.cookies += try engine.cookies(in: profile)

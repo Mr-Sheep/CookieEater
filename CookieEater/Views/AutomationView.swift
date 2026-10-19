@@ -52,9 +52,9 @@ struct AutomationView: View {
                                 } icon: {
                                     BrowserIcon(definition: browser.definition)
                                 }
-                                automationToggle("Cookies", browser.id, \.cookies)
-                                automationToggle("History", browser.id, \.history)
-                                automationToggle("Cache", browser.id, \.cache)
+                                automationToggle("Cookies", browser, .cookies)
+                                automationToggle("History", browser, .history)
+                                automationToggle("Cache", browser, .cache)
                             }
                         }
                     }
@@ -73,15 +73,6 @@ struct AutomationView: View {
                     }
                 }
                 Toggle("Open this window at launch", isOn: $model.settings.showWindowAtLaunch)
-                LabeledContent("Full Disk Access") {
-                    HStack {
-                        Text(model.hasFullDiskAccess ? "Granted" : "Not granted")
-                            .foregroundStyle(model.hasFullDiskAccess ? .green : .orange)
-                        Button("Open System Settings") {
-                            NSWorkspace.shared.open(Permissions.fullDiskAccessSettingsURL)
-                        }
-                    }
-                }
             } header: {
                 Text("General")
             } footer: {
@@ -114,12 +105,21 @@ struct AutomationView: View {
         }
     }
 
-    private func automationToggle(_ title: String, _ browserID: String,
-                                  _ option: WritableKeyPath<BrowserAutomation, Bool>) -> some View {
+    private func automationToggle(_ title: String, _ browser: InstalledBrowser, _ kind: DataKind) -> some View {
         Toggle(title, isOn: Binding {
-            model.settings.automation(for: browserID)[keyPath: option]
+            // Data CookieEater isn't allowed to open is never cleaned, so it shows as off.
+            model.settings.automation(for: browser.id)[kind] && !model.isBlocked(kind, browserID: browser.id)
         } set: { isOn in
-            model.settings.automation[browserID, default: BrowserAutomation()][keyPath: option] = isOn
+            guard isOn, model.isBlocked(kind, browserID: browser.id) else {
+                model.settings.automation[browser.id, default: BrowserAutomation()][kind] = isOn
+                return
+            }
+            // Ask for the folder outside the toggle's action; the checkbox turns on once access is allowed.
+            Task {
+                if model.ensureAccess(kind, for: browser) {
+                    model.settings.automation[browser.id, default: BrowserAutomation()][kind] = true
+                }
+            }
         })
         .toggleStyle(.checkbox)
         .labelsHidden()

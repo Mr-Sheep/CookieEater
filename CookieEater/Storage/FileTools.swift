@@ -5,6 +5,18 @@ enum FileTools {
         FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
     }
 
+    /// Whether macOS stops CookieEater from opening an existing folder, as it does with Safari's
+    /// until the user allows them.
+    static func isBlocked(_ folder: URL) -> Bool {
+        guard exists(folder) else { return false }
+        do {
+            _ = try FileManager.default.contentsOfDirectory(atPath: folder.path(percentEncoded: false))
+            return false
+        } catch {
+            return (error as NSError).code == NSFileReadNoPermissionError
+        }
+    }
+
     static func isNonEmptyFile(_ url: URL) -> Bool {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
         return size > 0
