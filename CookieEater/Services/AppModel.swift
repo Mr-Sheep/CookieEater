@@ -652,6 +652,7 @@ final class AppModel {
     // MARK: - Activity
 
     private func record(_ entry: ActivityEntry) {
+        guard settings.logsActivity else { return }
         activity.insert(entry, at: 0)
         if activity.count > 200 {
             activity.removeLast(activity.count - 200)

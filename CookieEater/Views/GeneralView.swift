@@ -24,6 +24,12 @@ struct GeneralView: View {
                 Text("CookieEater keeps running in the menu bar after you close this window.")
             }
 
+            Section {
+                Toggle("Enable activity log", isOn: $model.settings.logsActivity)
+            } header: {
+                Text("Activity")
+            }
+
             if let updater {
                 UpdatesSection(updater: updater)
             }

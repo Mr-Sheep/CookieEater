@@ -161,6 +161,8 @@ struct AppSettings: Codable, Equatable, Sendable {
     var autoSyncSeconds = 15
     /// How Chromium browsers' databases are read.
     var chromiumReading = DatabaseReading.copy
+    /// Whether cleanups and errors are added to the activity log.
+    var logsActivity = true
 
     init() {}
 
@@ -180,6 +182,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         autoSyncedBrowsers = try container.decodeIfPresent(Set<String>.self, forKey: .autoSyncedBrowsers) ?? defaults.autoSyncedBrowsers
         autoSyncSeconds = try container.decodeIfPresent(Int.self, forKey: .autoSyncSeconds) ?? defaults.autoSyncSeconds
         chromiumReading = try container.decodeIfPresent(DatabaseReading.self, forKey: .chromiumReading) ?? defaults.chromiumReading
+        logsActivity = try container.decodeIfPresent(Bool.self, forKey: .logsActivity) ?? defaults.logsActivity
     }
 
     func automation(for browserID: String) -> BrowserAutomation {
