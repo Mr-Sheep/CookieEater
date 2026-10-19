@@ -24,6 +24,8 @@ struct QuitPrompt: Identifiable {
 final class AppModel {
     /// How long to wait after a browser quits before touching its files, so it can finish writing them.
     private static let settleDelay = Duration.seconds(3)
+    /// How long copied cookie values stay on the clipboard.
+    private static let clipboardLifetime = Duration.seconds(90)
 
     /// Every supported browser with data on this Mac, including excluded ones.
     private(set) var installedBrowsers: [InstalledBrowser] = []
@@ -64,6 +66,7 @@ final class AppModel {
         refreshRunningBrowsers()
         startObserving()
         startScheduleTimer()
+        FileTools.removeLeftoverSnapshots()
         Task { await reload() }
     }
 
@@ -425,8 +428,8 @@ final class AppModel {
 
     // MARK: - Cookie values
 
-    /// Puts cookies and their values on the clipboard. This is the only place cookie values are read.
-    /// Cookies that no longer exist are left out.
+    /// Puts cookies and their values on the clipboard for `clipboardLifetime`. This is the only place cookie values
+    /// are read. Cookies that no longer exist are left out.
     func copy(_ cookies: [BrowserCookie], as format: CookieCopyFormat) async throws {
         let sources = Dictionary(grouping: cookies, by: \.profileID).compactMap { profileID, cookies in
             browser(withID: cookies[0].browserID).flatMap { browser in
@@ -442,8 +445,24 @@ final class AppModel {
             throw CookieValueError(cookies.count == 1 ? "The cookie no longer exists. Reload to see the current cookies."
                                                       : "These cookies no longer exist. Reload to see the current cookies.")
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(format.text(for: cookies, values: values), forType: .string)
+        // Clipboard managers leave out concealed and transient content (see nspasteboard.org), and content for the
+        // current host only isn't sent to other devices through Universal Clipboard.
+        let pasteboard = NSPasteboard.general
+        pasteboard.prepareForNewContents(with: .currentHostOnly)
+        let item = NSPasteboardItem()
+        item.setString(format.text(for: cookies, values: values), forType: .string)
+        for marker in ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"] {
+            item.setData(Data(), forType: NSPasteboard.PasteboardType(marker))
+        }
+        pasteboard.writeObjects([item])
+        let changeCount = pasteboard.changeCount
+        Task {
+            try? await Task.sleep(for: Self.clipboardLifetime)
+            // Anything copied since then is left alone.
+            if NSPasteboard.general.changeCount == changeCount {
+                NSPasteboard.general.clearContents()
+            }
+        }
     }
 
     func confirmQuit(_ prompt: QuitPrompt) {

@@ -142,11 +142,14 @@ enum FileTools {
         try FileManager.default.removeItem(at: url)
     }
 
+    /// Snapshot folders are named this followed by a UUID.
+    private static let snapshotPrefix = "CookieEater-"
+
     /// Reads an SQLite database through a private copy, so a running browser's locks don't get in the way
     /// and the original is never touched.
     static func readSQLiteSnapshot<T>(_ url: URL, _ body: (SQLiteDatabase) throws -> T) throws -> T {
         let fileManager = FileManager.default
-        let folder = fileManager.temporaryDirectory.appending(path: "CookieEater-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let folder = fileManager.temporaryDirectory.appending(path: snapshotPrefix + UUID().uuidString, directoryHint: .isDirectory)
         try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: folder) }
 
@@ -160,5 +163,16 @@ enum FileTools {
             }
         }
         return try body(SQLiteDatabase(url: copy))
+    }
+
+    /// Deletes the snapshots left behind when CookieEater quit in the middle of a read, e.g. after a crash.
+    static func removeLeftoverSnapshots() {
+        for folder in children(of: FileManager.default.temporaryDirectory) {
+            let name = folder.lastPathComponent
+            guard name.hasPrefix(snapshotPrefix), UUID(uuidString: String(name.dropFirst(snapshotPrefix.count))) != nil else {
+                continue
+            }
+            try? FileManager.default.removeItem(at: folder)
+        }
     }
 }
