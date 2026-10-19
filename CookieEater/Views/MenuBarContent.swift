@@ -3,6 +3,7 @@ import SwiftUI
 struct MenuBarContent: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    let checkForUpdates: (() -> Void)?
 
     var body: some View {
         Button("Open CookieEater") {
@@ -26,6 +27,9 @@ struct MenuBarContent: View {
             Text("Waiting for \(waiting.formatted(.list(type: .and))) to quit")
         }
         Divider()
+        if let checkForUpdates {
+            Button("Check for Updates…", action: checkForUpdates)
+        }
         Button("Quit CookieEater") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
