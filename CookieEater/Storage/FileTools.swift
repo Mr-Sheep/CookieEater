@@ -17,6 +17,11 @@ enum FileTools {
         }
     }
 
+    /// Whether `item` is `folder` itself or somewhere inside it.
+    static func isItem(_ item: URL, inside folder: URL) -> Bool {
+        item.standardizedFileURL.pathComponents.starts(with: folder.standardizedFileURL.pathComponents)
+    }
+
     static func isNonEmptyFile(_ url: URL) -> Bool {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
         return size > 0

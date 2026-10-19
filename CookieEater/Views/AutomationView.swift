@@ -116,7 +116,7 @@ struct AutomationView: View {
             }
             // Ask for the folder outside the toggle's action; the checkbox turns on once access is allowed.
             Task {
-                if model.ensureAccess(kind, for: browser) {
+                if model.ensureAccess([kind], for: browser) {
                     model.settings.automation[browser.id, default: BrowserAutomation()][kind] = true
                 }
             }

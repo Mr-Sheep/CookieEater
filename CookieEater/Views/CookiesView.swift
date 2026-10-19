@@ -82,17 +82,17 @@ struct CookiesView: View {
         let cookies = scopedCookies
         let groups = visibleGroups(from: cookies)
         VStack(spacing: 0) {
-            ForEach(model.browsers(in: scope).filter { model.isBlocked(.cookies, browserID: $0.id) }) { browser in
+            ForEach(model.browsers(in: scope).filter { !model.blockedKinds(browserID: $0.id).isEmpty }) { browser in
                 FolderAccessBanner(browser: browser)
                 Divider()
             }
             if let browser {
                 BrowserHeader(browser: browser, profileID: $profileID,
                               clearHistory: {
-                                  if model.ensureAccess(.history, for: browser) { pendingAction = .clearHistory }
+                                  if model.ensureAccess([.history], for: browser) { pendingAction = .clearHistory }
                               },
                               clearCache: {
-                                  if model.ensureAccess(.cache, for: browser) { pendingAction = .clearCache }
+                                  if model.ensureAccess([.cache], for: browser) { pendingAction = .clearCache }
                               })
                 Divider()
             }
@@ -383,29 +383,38 @@ private struct BrowserHeader: View {
     }
 }
 
-/// Shown while macOS keeps CookieEater out of a browser's cookies. Only Safari's are protected.
+/// Shown while macOS keeps CookieEater out of some of a browser's data. Only Safari's is protected.
 private struct FolderAccessBanner: View {
     @Environment(AppModel.self) private var model
     let browser: InstalledBrowser
 
     var body: some View {
+        let blocked = model.blockedKinds(browserID: browser.id)
         HStack(spacing: 12) {
             Image(systemName: "lock.shield")
                 .font(.title2)
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Allow access to \(browser.name)’s cookies")
+                Text("Allow access to \(browser.name)’s \(blocked.map(name).formatted(.list(type: .and)))")
                     .font(.headline)
-                Text("macOS protects \(browser.name)’s data. Click Allow Access, then click Allow in the window that opens on the folder where \(browser.name) keeps its cookies.")
+                Text("macOS protects \(browser.name)’s data, which is kept in several folders. Click Allow Access, then click Allow in each window that opens.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             Spacer()
             Button("Allow Access…") {
-                model.ensureAccess(.cookies, for: browser)
+                model.ensureAccess(blocked, for: browser)
             }
         }
         .padding(12)
         .background(.orange.opacity(0.08))
+    }
+
+    private func name(_ kind: DataKind) -> String {
+        switch kind {
+        case .cookies: "cookies"
+        case .history: "history"
+        case .cache: "cache"
+        }
     }
 }

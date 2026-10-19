@@ -80,6 +80,10 @@ final class AppModel {
         blockedData[browserID]?.contains(kind) ?? false
     }
 
+    func blockedKinds(browserID: String) -> [DataKind] {
+        DataKind.allCases.filter { isBlocked($0, browserID: browserID) }
+    }
+
     func browser(withID id: String) -> InstalledBrowser? {
         browsers.first { $0.id == id }
     }
@@ -169,14 +173,33 @@ final class AppModel {
 
     // MARK: - Folder access
 
-    /// Asks the user to allow the protected folders that hold this kind of data, one open panel per folder.
-    /// Returns whether CookieEater can open all of them.
+    /// Asks the user to allow the protected folders that hold these kinds of data, one open panel per folder,
+    /// stopping at the first one they don't allow. Returns whether CookieEater can open all of them.
     @discardableResult
-    func ensureAccess(_ kind: DataKind, for browser: InstalledBrowser) -> Bool {
-        let blocked = browser.definition.protectedFolders(for: kind).filter(FileTools.isBlocked)
-        guard !blocked.isEmpty else { return true }
-        let message = accessMessage(for: kind, browserName: browser.name)
-        let granted = blocked.allSatisfy { folderAccess.requestAccess(to: $0, message: message) }
+    func ensureAccess(_ kinds: [DataKind], for browser: InstalledBrowser) -> Bool {
+        var requests: [(folder: URL, kind: DataKind)] = []
+        for kind in kinds {
+            for folder in browser.definition.protectedFolders(for: kind)
+            where FileTools.isBlocked(folder) && !requests.contains(where: { $0.folder == folder }) {
+                requests.append((folder, kind))
+            }
+        }
+        // Allowing a folder also allows everything inside it, such as the cache in Safari's data folder.
+        let folders = requests.map(\.folder)
+        requests = requests.filter { request in
+            !folders.contains { $0 != request.folder && FileTools.isItem(request.folder, inside: $0) }
+        }
+        guard !requests.isEmpty else { return true }
+
+        var granted = true
+        for (index, request) in requests.enumerated() {
+            let step = requests.count > 1 ? "Folder \(index + 1) of \(requests.count). " : ""
+            let message = step + accessMessage(for: request.kind, browserName: browser.name)
+            guard folderAccess.requestAccess(to: request.folder, message: message) else {
+                granted = false
+                break
+            }
+        }
         if refreshAccess() {
             Task { await reload() }
         }

@@ -29,7 +29,7 @@ final class FolderAccess {
         guard panel.runModal() == .OK, let chosen = panel.url else { return false }
 
         // Choosing a parent folder covers this one too; choosing a folder inside it doesn't.
-        guard folder.standardizedFileURL.pathComponents.starts(with: chosen.standardizedFileURL.pathComponents) else {
+        guard FileTools.isItem(folder, inside: chosen) else {
             let alert = NSAlert()
             alert.messageText = "Choose the folder the window opened in"
             alert.informativeText = "CookieEater needs “\((folder.path(percentEncoded: false) as NSString).abbreviatingWithTildeInPath)”. Click Allow without opening another folder."
