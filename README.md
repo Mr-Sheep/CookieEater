@@ -2,6 +2,19 @@
 
 ![screenshot](https://raw.githubusercontent.com/Mr-Sheep/CookieEater/refs/heads/master/assets/screenshot.webp)
 
+## TOC
+
+* [CookieEater](README.md#cookieeater)
+   * [Supported browsers](README.md#supported-browsers)
+   * [Building](README.md#building)
+      * [Permissions](README.md#permissions)
+   * [How it works](README.md#how-it-works)
+      * [Security and Privacy](README.md#security-and-privacy)
+      * [Limitations](README.md#limitations)
+   * [License](README.md#license)
+
+## What is CookieEater
+
 A macOS app written in Swift that inspect/manage browser cookies/histories/caches. Some of the features are:
 
 - **Exclude browsers:** turn off any browser you want CookieEater to leave alone.
