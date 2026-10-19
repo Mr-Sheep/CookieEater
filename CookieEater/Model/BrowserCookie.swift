@@ -47,15 +47,8 @@ struct CookieValueError: LocalizedError {
 }
 
 enum Domain {
-    /// Second-level labels that act as public suffixes, so "example.co.uk" groups as one site.
-    /// Deliberately short: a full public suffix list would be an external dependency.
-    private static let multiLabelSuffixes: Set<String> = [
-        "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk",
-        "com.au", "net.au", "org.au", "edu.au", "gov.au",
-        "co.nz", "org.nz", "co.jp", "ne.jp", "or.jp", "ac.jp", "go.jp",
-        "co.kr", "or.kr", "com.cn", "net.cn", "org.cn", "com.hk", "com.tw", "com.sg",
-        "co.in", "com.br", "com.mx", "com.ar", "com.tr", "co.za", "co.il", "com.ua",
-    ]
+    private static let publicSuffixes = PublicSuffixList(
+        contentsOf: Bundle.main.url(forResource: "public_suffix_list", withExtension: "dat"))
 
     /// "https://www.Example.com/page" gives "www.example.com"; URLs without a host, such as file URLs, give "".
     static func host(ofURL url: String) -> String {
@@ -88,15 +81,68 @@ enum Domain {
         return text
     }
 
+    /// The registrable domain: the public suffix plus one label, e.g. "www.bbc.co.uk" gives "bbc.co.uk" and
+    /// "x.alice.github.io" gives "alice.github.io". A host that is itself a public suffix, such as "github.io", stays
+    /// as it is.
     static func site(for host: String) -> String {
         let labels = host.split(separator: ".")
         guard labels.count > 2, !isIPAddress(host) else { return host }
-        let lastTwo = labels.suffix(2).joined(separator: ".")
-        return labels.suffix(multiLabelSuffixes.contains(lastTwo) ? 3 : 2).joined(separator: ".")
+        // "a.b.c" gives "a.b.c", "b.c" and "c".
+        let suffixes = labels.map { host[$0.startIndex...] }
+        let publicSuffix = publicSuffixes.index(in: suffixes)
+        return publicSuffix == 0 ? host : String(suffixes[publicSuffix - 1])
     }
 
     static func isIPAddress(_ host: String) -> Bool {
         host.contains(":") || host.allSatisfy { $0.isNumber || $0 == "." }
+    }
+}
+
+/// The rules of the Public Suffix List (https://publicsuffix.org), bundled as `public_suffix_list.dat`. Like browsers,
+/// it uses the private section too, so "alice.github.io" and "bob.github.io" are separate sites.
+private struct PublicSuffixList: Sendable {
+    // Substrings, so a host's suffixes can be looked up without copying them.
+    private var rules: Set<Substring> = []
+    /// "ck" for the rule "*.ck".
+    private var wildcardParents: Set<Substring> = []
+    /// "www.ck" for the rule "!www.ck".
+    private var exceptions: Set<Substring> = []
+
+    init(contentsOf url: URL?) {
+        guard let url, let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+        for line in text.split(whereSeparator: \.isNewline) {
+            // Only a line's first word counts, and comments start with "//".
+            guard let word = line.split(whereSeparator: \.isWhitespace).first, !word.hasPrefix("//") else { continue }
+            let rule = word.lowercased()
+            if rule.hasPrefix("!") {
+                exceptions.formUnion(Self.spellings(of: rule.dropFirst()))
+            } else if rule.hasPrefix("*.") {
+                wildcardParents.formUnion(Self.spellings(of: rule.dropFirst(2)))
+            } else {
+                rules.formUnion(Self.spellings(of: rule[...]))
+            }
+        }
+    }
+
+    /// Which of a host's suffixes, ordered from the whole host to its top-level domain, is its public suffix.
+    func index(in suffixes: [Substring]) -> Int {
+        // An exception rule beats every other rule, and its first label isn't part of the public suffix.
+        if let exception = suffixes.firstIndex(where: exceptions.contains) {
+            return exception + 1
+        }
+        // Otherwise the longest matching rule wins. With no match, the top-level domain is the public suffix.
+        return suffixes.indices.first { index in
+            rules.contains(suffixes[index])
+                || (index + 1 < suffixes.count && wildcardParents.contains(suffixes[index + 1]))
+        } ?? suffixes.count - 1
+    }
+
+    /// Internationalized rules are listed in Unicode, but hosts usually arrive in punycode ("xn--…"), so both count.
+    private static func spellings(of name: Substring) -> [Substring] {
+        guard !name.allSatisfy(\.isASCII) else { return [name] }
+        var components = URLComponents()
+        components.host = String(name)
+        return [name] + (components.encodedHost.map { [$0[...]] } ?? [])
     }
 }
 

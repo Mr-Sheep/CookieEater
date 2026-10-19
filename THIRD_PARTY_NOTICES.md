@@ -216,3 +216,9 @@ CookieEater's own code is under the MIT License (see [LICENSE](LICENSE)). It als
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
+
+## Public Suffix List
+
+- **Source:** [`public_suffix_list.dat`](https://publicsuffix.org/list/public_suffix_list.dat) from the [Public Suffix List](https://publicsuffix.org), version `2026-10-17_18-52-06_UTC`
+- **License:** [Mozilla Public License, Version 2.0](https://mozilla.org/MPL/2.0/)
+- **Used in:** `CookieEater/public_suffix_list.dat`, unmodified, to group hosts into sites.
