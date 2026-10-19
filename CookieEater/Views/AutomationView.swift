@@ -44,6 +44,7 @@ struct AutomationView: View {
                     Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 10) {
                         GridRow {
                             Text("Browser")
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             Text("Cookies")
                             Text("History")
                             Text("Cache")
