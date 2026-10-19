@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  # Keep in step with the Sparkle version in CookieEater.xcodeproj.
+  SPARKLE_VERSION: '2.10.0'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build
+        run: |
+          xcodebuild archive \
+            -project CookieEater.xcodeproj \
+            -scheme CookieEater \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -archivePath "$RUNNER_TEMP/CookieEater.xcarchive" \
+            MARKETING_VERSION="${GITHUB_REF_NAME#v}" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CODE_SIGNING_ALLOWED=NO
+          # ditto keeps the symlinks and permissions the signature depends on.
+          ditto -c -k --keepParent "$RUNNER_TEMP/CookieEater.xcarchive/Products/Applications/CookieEater.app" "$RUNNER_TEMP/unsigned.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: unsigned
+          path: ${{ runner.temp }}/unsigned.zip
+
+  sign:
+    runs-on: macos-latest
+    needs: build
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: unsigned
+          path: ${{ runner.temp }}
+
+      - name: Sign
+        env:
+          APPLE_CERT: ${{ secrets.APPLE_CERT }}
+          APPLE_CERT_PWD: ${{ secrets.APPLE_CERT_PWD }}
+        run: |
+          cd "$RUNNER_TEMP"
+          ditto -x -k unsigned.zip .
+
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PWD=$(uuidgen)
+          echo "$APPLE_CERT" | base64 --decode > cert.p12
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security import cert.p12 -k "$KEYCHAIN" -P "$APPLE_CERT_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+          rm cert.p12
+
+          sign() { codesign --force --options runtime --timestamp --keychain "$KEYCHAIN" -s "Developer ID Application" "$@"; }
+          # Inside out, in the order Sparkle's documentation gives.
+          SPARKLE=CookieEater.app/Contents/Frameworks/Sparkle.framework
+          sign "$SPARKLE/Versions/B/XPCServices/Installer.xpc"
+          sign --preserve-metadata=entitlements "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
+          sign "$SPARKLE/Versions/B/Autoupdate"
+          sign "$SPARKLE/Versions/B/Updater.app"
+          sign "$SPARKLE"
+          sign CookieEater.app
+          codesign --verify --deep --strict CookieEater.app
+
+      - name: Notarize
+        env:
+          APPLE_NOTARIZATION_ID: ${{ secrets.APPLE_NOTARIZATION_ID }}
+          APPLE_NOTARIZATION_TEAM_ID: ${{ secrets.APPLE_NOTARIZATION_TEAM_ID }}
+          APPLE_NOTARIZATION_PWD: ${{ secrets.APPLE_NOTARIZATION_PWD }}
+        run: |
+          cd "$RUNNER_TEMP"
+          ditto -c -k --keepParent CookieEater.app notarize.zip
+          xcrun notarytool submit notarize.zip --wait \
+            --apple-id "$APPLE_NOTARIZATION_ID" \
+            --team-id "$APPLE_NOTARIZATION_TEAM_ID" \
+            --password "$APPLE_NOTARIZATION_PWD"
+          xcrun stapler staple CookieEater.app
+
+      - name: Package
+        run: |
+          cd "$RUNNER_TEMP"
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir release dmg
+          ditto -c -k --keepParent CookieEater.app "release/CookieEater-$VERSION.zip"
+          ditto CookieEater.app dmg/CookieEater.app
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname CookieEater -srcfolder dmg -format UDZO "release/CookieEater-$VERSION.dmg"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: signed
+          path: ${{ runner.temp }}/release
+
+  release:
+    runs-on: macos-latest
+    needs: sign
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: signed
+          path: ${{ runner.temp }}/release
+
+      - name: Create appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          cd "$RUNNER_TEMP"
+          mkdir sparkle updates
+          curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" | tar -xf - -C sparkle
+          cp release/*.zip updates/
+          (umask 077; echo "$SPARKLE_PRIVATE_KEY" > sparkle_key)
+          sparkle/bin/generate_appcast --ed-key-file sparkle_key \
+            --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/" \
+            -o "$RUNNER_TEMP/release/appcast.xml" updates 2>&1 | tee appcast.log
+          rm sparkle_key
+          # generate_appcast only warns when the key doesn't match the app's SUPublicEDKey; such an update can't be installed.
+          ! grep -q "does not match" appcast.log
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/release/* --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
