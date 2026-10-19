@@ -1,0 +1,88 @@
+import Foundation
+
+enum FileTools {
+    static func exists(_ url: URL) -> Bool {
+        FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
+    }
+
+    static func isNonEmptyFile(_ url: URL) -> Bool {
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        return size > 0
+    }
+
+    static func subdirectories(of directory: URL) -> [URL] {
+        let children = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        return children.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
+    }
+
+    /// The first file with the given extension inside `directory`, searching a few levels deep.
+    static func firstFile(in directory: URL, withExtension pathExtension: String) -> URL? {
+        guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil) else {
+            return nil
+        }
+        for case let url as URL in enumerator {
+            if enumerator.level > 3 { enumerator.skipDescendants() }
+            if url.pathExtension == pathExtension { return url }
+        }
+        return nil
+    }
+
+    /// Disk space used by a file or folder, including everything inside it.
+    static func allocatedSize(of url: URL) -> Int64 {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .totalFileAllocatedSizeKey]
+        guard let values = try? url.resourceValues(forKeys: keys) else { return 0 }
+        guard values.isDirectory == true else { return Int64(values.totalFileAllocatedSize ?? 0) }
+        guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: Array(keys)) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for case let child as URL in enumerator {
+            total += Int64((try? child.resourceValues(forKeys: keys))?.totalFileAllocatedSize ?? 0)
+        }
+        return total
+    }
+
+    /// Deletes everything inside `directory`, keeping the folder itself. Returns the bytes freed.
+    static func removeContents(of directory: URL) throws -> Int64 {
+        let children = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        var freed: Int64 = 0
+        var firstError: Error?
+        for child in children {
+            let size = allocatedSize(of: child)
+            do {
+                try FileManager.default.removeItem(at: child)
+                freed += size
+            } catch {
+                firstError = firstError ?? error
+            }
+        }
+        if let firstError { throw firstError }
+        return freed
+    }
+
+    static func removeItemIfPresent(_ url: URL) throws {
+        guard exists(url) else { return }
+        try FileManager.default.removeItem(at: url)
+    }
+
+    /// Reads an SQLite database through a private copy, so a running browser's locks don't get in the way
+    /// and the original is never touched.
+    static func readSQLiteSnapshot<T>(_ url: URL, _ body: (SQLiteDatabase) throws -> T) throws -> T {
+        let fileManager = FileManager.default
+        let folder = fileManager.temporaryDirectory.appending(path: "CookieEater-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: folder) }
+
+        let copy = folder.appending(path: url.lastPathComponent)
+        try fileManager.copyItem(at: url, to: copy)
+        // Committed changes may still live in the write-ahead log or a hot journal.
+        for suffix in ["-wal", "-journal"] {
+            let sidecar = URL(filePath: url.path(percentEncoded: false) + suffix)
+            if exists(sidecar) {
+                try? fileManager.copyItem(at: sidecar, to: URL(filePath: copy.path(percentEncoded: false) + suffix))
+            }
+        }
+        return try body(SQLiteDatabase(url: copy))
+    }
+}

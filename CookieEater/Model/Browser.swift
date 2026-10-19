@@ -1,0 +1,113 @@
+import Foundation
+
+/// The engine a browser is built on, which decides how its data is stored on disk.
+enum BrowserFamily: String, Sendable {
+    case safari
+    case chromium
+    case firefox
+}
+
+/// A browser CookieEater knows how to clean, and where it keeps its data.
+struct BrowserDefinition: Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let family: BrowserFamily
+    /// Every app that uses this data folder, e.g. Firefox, Firefox Developer Edition and Firefox Nightly.
+    let bundleIDs: [String]
+    /// The browser's data folder, relative to the home folder.
+    let dataPath: String
+    /// Folders holding the browser's cache, relative to the home folder.
+    let cachePaths: [String]
+    /// Safari only: the folder outside the app container that holds History.db.
+    var historyPath: String? = nil
+    /// Ships with macOS, so it is listed even before its data folder can be read.
+    var isBuiltIn = false
+
+    var dataDirectory: URL {
+        URL.homeDirectory.appending(path: dataPath, directoryHint: .isDirectory)
+    }
+
+    var cacheDirectories: [URL] {
+        cachePaths.map { URL.homeDirectory.appending(path: $0, directoryHint: .isDirectory) }
+    }
+
+    func makeEngine() -> any BrowserEngine {
+        switch family {
+        case .safari: SafariEngine(browser: self)
+        case .chromium: ChromiumEngine(browser: self)
+        case .firefox: FirefoxEngine(browser: self)
+        }
+    }
+}
+
+extension BrowserDefinition {
+    private static func chromium(_ id: String, _ name: String, bundleID: String, folder: String, cacheFolder: String? = nil) -> BrowserDefinition {
+        BrowserDefinition(id: id, name: name, family: .chromium, bundleIDs: [bundleID],
+                          dataPath: "Library/Application Support/\(folder)",
+                          cachePaths: ["Library/Caches/\(cacheFolder ?? folder)"])
+    }
+
+    private static func firefox(_ id: String, _ name: String, bundleIDs: [String], folder: String) -> BrowserDefinition {
+        BrowserDefinition(id: id, name: name, family: .firefox, bundleIDs: bundleIDs,
+                          dataPath: "Library/Application Support/\(folder)",
+                          cachePaths: ["Library/Caches/\(folder)"])
+    }
+
+    /// Every supported browser. Browsers without data on this Mac are hidden.
+    static let all: [BrowserDefinition] = [
+        BrowserDefinition(id: "safari", name: "Safari", family: .safari, bundleIDs: ["com.apple.Safari"],
+                          dataPath: "Library/Containers/com.apple.Safari/Data/Library",
+                          cachePaths: ["Library/Caches/com.apple.Safari",
+                                       "Library/Containers/com.apple.Safari/Data/Library/Caches/com.apple.Safari"],
+                          historyPath: "Library/Safari",
+                          isBuiltIn: true),
+        BrowserDefinition(id: "safari-tp", name: "Safari Technology Preview", family: .safari,
+                          bundleIDs: ["com.apple.SafariTechnologyPreview"],
+                          dataPath: "Library/Containers/com.apple.SafariTechnologyPreview/Data/Library",
+                          cachePaths: ["Library/Caches/com.apple.SafariTechnologyPreview",
+                                       "Library/Containers/com.apple.SafariTechnologyPreview/Data/Library/Caches/com.apple.SafariTechnologyPreview"],
+                          historyPath: "Library/SafariTechnologyPreview"),
+
+        chromium("chrome", "Google Chrome", bundleID: "com.google.Chrome", folder: "Google/Chrome"),
+        chromium("chrome-beta", "Google Chrome Beta", bundleID: "com.google.Chrome.beta", folder: "Google/Chrome Beta"),
+        chromium("chrome-dev", "Google Chrome Dev", bundleID: "com.google.Chrome.dev", folder: "Google/Chrome Dev"),
+        chromium("chrome-canary", "Google Chrome Canary", bundleID: "com.google.Chrome.canary", folder: "Google/Chrome Canary"),
+        chromium("chromium", "Chromium", bundleID: "org.chromium.Chromium", folder: "Chromium"),
+        chromium("edge", "Microsoft Edge", bundleID: "com.microsoft.edgemac", folder: "Microsoft Edge"),
+        chromium("brave", "Brave", bundleID: "com.brave.Browser", folder: "BraveSoftware/Brave-Browser"),
+        chromium("vivaldi", "Vivaldi", bundleID: "com.vivaldi.Vivaldi", folder: "Vivaldi"),
+        chromium("opera", "Opera", bundleID: "com.operasoftware.Opera", folder: "com.operasoftware.Opera"),
+        chromium("arc", "Arc", bundleID: "company.thebrowser.Browser", folder: "Arc/User Data", cacheFolder: "Arc"),
+        chromium("dia", "Dia", bundleID: "company.thebrowser.dia", folder: "Dia/User Data", cacheFolder: "Dia"),
+        chromium("comet", "Comet", bundleID: "ai.perplexity.comet", folder: "Comet"),
+        chromium("helium", "Helium", bundleID: "net.imput.helium", folder: "net.imput.helium"),
+
+        firefox("firefox", "Firefox",
+                bundleIDs: ["org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly"],
+                folder: "Firefox"),
+        firefox("zen", "Zen", bundleIDs: ["app.zen-browser.zen"], folder: "zen"),
+        firefox("librewolf", "LibreWolf", bundleIDs: ["org.mozilla.librewolf", "io.gitlab.librewolf-community"], folder: "librewolf"),
+        firefox("waterfox", "Waterfox", bundleIDs: ["net.waterfox.waterfox"], folder: "Waterfox"),
+        firefox("floorp", "Floorp", bundleIDs: ["one.ablaze.floorp"], folder: "Floorp"),
+        firefox("mullvad", "Mullvad Browser", bundleIDs: ["net.mullvad.mullvadbrowser"], folder: "MullvadBrowser"),
+    ]
+}
+
+/// One profile of a browser. Browsers without profile support have a single "Default" profile.
+struct BrowserProfile: Identifiable, Hashable, Sendable {
+    let id: String
+    let browserID: String
+    let name: String
+    let directory: URL
+    var cookiesFile: URL?
+    var historyFile: URL?
+}
+
+/// A supported browser that has data on this Mac.
+struct InstalledBrowser: Identifiable, Hashable, Sendable {
+    let definition: BrowserDefinition
+    let profiles: [BrowserProfile]
+
+    var id: String { definition.id }
+    var name: String { definition.name }
+}
