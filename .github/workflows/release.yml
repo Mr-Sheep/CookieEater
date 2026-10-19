@@ -25,6 +25,21 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Release notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # The section under "## <version>" in CHANGELOG.md, up to the next "## " heading.
+          awk -v v="$VERSION" '/^## /{f = ($2 == v); next} f' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "::warning::CHANGELOG.md has no notes for $VERSION"
+            echo "No release notes for this version." > "$RUNNER_TEMP/notes.md"
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: notes
+          path: ${{ runner.temp }}/notes.md
+
       - name: Build
         run: |
           xcodebuild archive \
@@ -101,24 +116,14 @@ jobs:
           cd "$RUNNER_TEMP"
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir release dmg
-          ditto -c -k --keepParent CookieEater.app "release/CookieEater-$VERSION.zip"
           ditto CookieEater.app dmg/CookieEater.app
           ln -s /Applications dmg/Applications
           hdiutil create -volname CookieEater -srcfolder dmg -format UDZO "release/CookieEater-$VERSION.dmg"
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: signed
-          path: ${{ runner.temp }}/release
-
-  release:
-    runs-on: macos-latest
-    needs: sign
-    steps:
       - uses: actions/download-artifact@v8
         with:
-          name: signed
-          path: ${{ runner.temp }}/release
+          name: notes
+          path: ${{ runner.temp }}
 
       - name: Create appcast
         env:
@@ -127,16 +132,37 @@ jobs:
           cd "$RUNNER_TEMP"
           mkdir sparkle updates
           curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" | tar -xf - -C sparkle
-          cp release/*.zip updates/
+          cp release/*.dmg updates/
+          # generate_appcast takes the notes from a .md named after the archive.
+          cp notes.md "updates/CookieEater-${GITHUB_REF_NAME#v}.md"
           (umask 077; echo "$SPARKLE_PRIVATE_KEY" > sparkle_key)
-          sparkle/bin/generate_appcast --ed-key-file sparkle_key \
+          sparkle/bin/generate_appcast --ed-key-file sparkle_key --embed-release-notes \
             --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/" \
             -o "$RUNNER_TEMP/release/appcast.xml" updates 2>&1 | tee appcast.log
           rm sparkle_key
           # generate_appcast only warns when the key doesn't match the app's SUPublicEDKey; such an update can't be installed.
           ! grep -q "does not match" appcast.log
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: signed
+          path: ${{ runner.temp }}/release
+
+  release:
+    runs-on: ubuntu-latest
+    needs: sign
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: signed
+          path: ${{ runner.temp }}/release
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: notes
+          path: ${{ runner.temp }}
+
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/release/* --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/release/* --repo "$GITHUB_REPOSITORY" --verify-tag --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
