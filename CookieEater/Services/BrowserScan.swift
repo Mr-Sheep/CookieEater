@@ -6,13 +6,15 @@ struct BrowserScan: Sendable {
     var cookies: [BrowserCookie] = []
     var problems: [String] = []
 
-    static func perform() -> BrowserScan {
+    /// Excluded browsers are still listed, but their cookies are not read.
+    static func perform(excluding excluded: Set<String> = []) -> BrowserScan {
         var scan = BrowserScan()
         for definition in BrowserDefinition.all where definition.isBuiltIn || FileTools.exists(definition.dataDirectory) {
             let engine = definition.makeEngine()
             let profiles = engine.profiles()
             guard !profiles.isEmpty else { continue }
             scan.browsers.append(InstalledBrowser(definition: definition, profiles: profiles))
+            guard !excluded.contains(definition.id) else { continue }
             for profile in profiles {
                 do {
                     scan.cookies += try engine.cookies(in: profile)

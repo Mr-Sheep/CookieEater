@@ -51,6 +51,8 @@ struct AppSettings: Codable, Equatable, Sendable {
     var exceptions: [String] = []
     /// Keyed by `BrowserDefinition.id`.
     var automation: [String: BrowserAutomation] = [:]
+    /// `BrowserDefinition.id`s of browsers CookieEater leaves alone: their data is neither read nor cleaned.
+    var excludedBrowsers: Set<String> = []
     var cleanOnQuit = false
     var schedule = CleanupSchedule()
     var lastScheduledRun: Date?
@@ -63,6 +65,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         let defaults = AppSettings()
         exceptions = try container.decodeIfPresent([String].self, forKey: .exceptions) ?? defaults.exceptions
         automation = try container.decodeIfPresent([String: BrowserAutomation].self, forKey: .automation) ?? defaults.automation
+        excludedBrowsers = try container.decodeIfPresent(Set<String>.self, forKey: .excludedBrowsers) ?? defaults.excludedBrowsers
         cleanOnQuit = try container.decodeIfPresent(Bool.self, forKey: .cleanOnQuit) ?? defaults.cleanOnQuit
         schedule = try container.decodeIfPresent(CleanupSchedule.self, forKey: .schedule) ?? defaults.schedule
         lastScheduledRun = try container.decodeIfPresent(Date.self, forKey: .lastScheduledRun)

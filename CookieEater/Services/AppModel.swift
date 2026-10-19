@@ -25,7 +25,8 @@ final class AppModel {
     /// How long to wait after a browser quits before touching its files, so it can finish writing them.
     private static let settleDelay = Duration.seconds(3)
 
-    private(set) var browsers: [InstalledBrowser] = []
+    /// Every supported browser with data on this Mac, including excluded ones.
+    private(set) var installedBrowsers: [InstalledBrowser] = []
     private(set) var cookies: [BrowserCookie] = []
     private(set) var stats: [String: BrowserStats] = [:]
     private(set) var problems: [String] = []
@@ -63,6 +64,20 @@ final class AppModel {
     // MARK: - Queries
 
     var exceptionList: ExceptionList { ExceptionList(settings.exceptions) }
+
+    /// The browsers CookieEater shows and cleans: every installed browser that isn't excluded.
+    var browsers: [InstalledBrowser] {
+        installedBrowsers.filter { !settings.excludedBrowsers.contains($0.id) }
+    }
+
+    func isExcluded(_ browserID: String) -> Bool {
+        settings.excludedBrowsers.contains(browserID)
+    }
+
+    /// Only Safari's data is protected, so the permission doesn't matter while Safari is excluded.
+    var needsFullDiskAccess: Bool {
+        !hasFullDiskAccess && browsers.contains { $0.definition.family == .safari }
+    }
 
     func browser(withID id: String) -> InstalledBrowser? {
         browsers.first { $0.id == id }
@@ -138,6 +153,19 @@ final class AppModel {
         }
     }
 
+    func setExcluded(_ excluded: Bool, browserID: String) {
+        if excluded {
+            settings.excludedBrowsers.insert(browserID)
+            cookies.removeAll { $0.browserID == browserID }
+            stats[browserID] = nil
+            waitingBrowserIDs.remove(browserID)
+        } else {
+            settings.excludedBrowsers.remove(browserID)
+        }
+        // Also discards a scan that started before the change.
+        Task { await reload() }
+    }
+
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
             if enabled {
@@ -166,17 +194,18 @@ final class AppModel {
         reloadGeneration += 1
         let generation = reloadGeneration
         isLoading = true
-        let scan = await Task.detached(priority: .userInitiated) { BrowserScan.perform() }.value
+        let excluded = settings.excludedBrowsers
+        let scan = await Task.detached(priority: .userInitiated) { BrowserScan.perform(excluding: excluded) }.value
         guard generation == reloadGeneration else { return }
-        browsers = scan.browsers
+        installedBrowsers = scan.browsers
         cookies = scan.cookies
         problems = scan.problems
         hasFullDiskAccess = Permissions.hasFullDiskAccess()
         isLoading = false
 
-        let installed = scan.browsers
+        let included = browsers
         let stats = await Task.detached(priority: .utility) {
-            Dictionary(uniqueKeysWithValues: installed.map { ($0.id, BrowserStats.collect(for: $0)) })
+            Dictionary(uniqueKeysWithValues: included.map { ($0.id, BrowserStats.collect(for: $0)) })
         }.value
         guard generation == reloadGeneration else { return }
         self.stats = stats

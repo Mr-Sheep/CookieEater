@@ -62,7 +62,7 @@ struct AutomationView: View {
             } header: {
                 Text("What to Clean")
             } footer: {
-                Text("Cookies from sites on the exception list are always kept.")
+                Text("Cookies from sites on the exception list are always kept. Excluded browsers are never cleaned.")
             }
 
             Section {

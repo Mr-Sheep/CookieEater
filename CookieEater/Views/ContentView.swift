@@ -3,6 +3,7 @@ import SwiftUI
 enum SidebarItem: Hashable {
     case allBrowsers
     case browser(String)
+    case browsers
     case exceptions
     case automation
     case activity
@@ -25,6 +26,8 @@ struct ContentView: View {
                     }
                 }
                 Section("Settings") {
+                    Label("Browsers", systemImage: "macwindow.on.rectangle")
+                        .tag(SidebarItem.browsers)
                     Label("Exceptions", systemImage: "checkmark.shield")
                         .badge(model.settings.exceptions.count)
                         .tag(SidebarItem.exceptions)
@@ -37,7 +40,7 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 200, ideal: 230)
         } detail: {
             VStack(spacing: 0) {
-                if !model.hasFullDiskAccess {
+                if model.needsFullDiskAccess {
                     FullDiskAccessBanner()
                     Divider()
                 }
@@ -52,6 +55,12 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) { model.quitPrompt = nil }
         } message: { prompt in
             Text("\(prompt.browserNames) keeps this data in memory while it’s open and would write it back. CookieEater will quit it, then finish removing the data.")
+        }
+        .onChange(of: model.browsers.map(\.id)) { _, ids in
+            // The selected browser was excluded or uninstalled.
+            if case .browser(let id) = selection, !ids.contains(id) {
+                selection = .allBrowsers
+            }
         }
         .onAppear {
             NSApp.setActivationPolicy(.regular)
@@ -70,6 +79,8 @@ struct ContentView: View {
         case .browser(let id):
             CookiesView(scope: .browser(id))
                 .id(id)
+        case .browsers:
+            BrowsersView()
         case .exceptions:
             ExceptionsView()
         case .automation:
@@ -96,6 +107,11 @@ private struct BrowserSidebarRow: View {
             BrowserIcon(definition: browser.definition)
         }
         .badge(model.cookies.count { $0.browserID == browser.id })
+        .contextMenu {
+            Button("Exclude \(browser.name)") {
+                model.setExcluded(true, browserID: browser.id)
+            }
+        }
     }
 }
 
