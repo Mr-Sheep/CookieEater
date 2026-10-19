@@ -403,6 +403,8 @@ private struct BrowserHeader: View {
     let browser: InstalledBrowser
     @Binding var profileID: String?
 
+    @State private var confirmsCleaning = false
+
     var body: some View {
         HStack(spacing: 12) {
             BrowserIcon(definition: browser.definition, size: 40)
@@ -434,8 +436,23 @@ private struct BrowserHeader: View {
                 }
                 .fixedSize()
             }
+            Button("Clean Now") { confirmsCleaning = true }
+                .disabled(!model.canClean(browser, profileID: profileID))
+                .help("Remove cookies, history and cache, except for sites on the exception lists")
         }
         .padding(16)
+        .confirmationDialog("Clean \(scopeName)?", isPresented: $confirmsCleaning) {
+            Button("Clean", role: .destructive) { model.clean(browser, profileID: profileID) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Cookies, history and cache are removed, except for sites on the exception lists. This can't be undone.")
+        }
+    }
+
+    /// "Chrome", or "Chrome (Work)" when one profile is selected.
+    private var scopeName: String {
+        guard let profile = browser.profiles.first(where: { $0.id == profileID }) else { return browser.name }
+        return "\(browser.name) (\(profile.name))"
     }
 
     private func statistic(for kind: DataKind) -> String {

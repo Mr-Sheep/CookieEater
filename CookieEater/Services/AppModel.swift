@@ -314,6 +314,36 @@ final class AppModel {
                title: "Removed \(kind.title.lowercased()) not on the exception list")
     }
 
+    /// Whether `clean(_:profileID:)` has anything to remove.
+    func canClean(_ browser: InstalledBrowser, profileID: String?) -> Bool {
+        cleanRequest(for: browser, profileID: profileID) != nil
+    }
+
+    /// Removes every kind of data that isn't on its exception list from a browser, or from one of its profiles.
+    func clean(_ browser: InstalledBrowser, profileID: String?) {
+        guard let request = cleanRequest(for: browser, profileID: profileID) else { return }
+        let profile = browser.profiles.first { $0.id == profileID }
+        submit([request], title: "Cleaned \(profile.map { "\(browser.name) (\($0.name))" } ?? browser.name)")
+    }
+
+    private func cleanRequest(for browser: InstalledBrowser, profileID: String?) -> CleanupRequest? {
+        // When cleaning one profile, the others' files aren't touched.
+        let otherProfiles = profileID == nil ? [] : Set(browser.profiles.map(\.id).filter { $0 != profileID })
+        var request = CleanupRequest(browser: browser.definition, profiles: browser.profiles,
+                                     skippedProfileIDs: otherProfiles)
+        for kind in DataKind.allCases {
+            let exceptions = exceptionList(for: kind)
+            let shouldRemove: @Sendable (any SiteData) -> Bool = { item in
+                (profileID == nil || item.profileID == profileID) && !exceptions.covers(item.host)
+            }
+            // Kinds with nothing to remove are left out, so an open browser isn't quit for nothing.
+            if items(kind).contains(where: { $0.browserID == browser.id && shouldRemove($0) }) {
+                request.removals[kind] = shouldRemove
+            }
+        }
+        return request.removals.isEmpty ? nil : request
+    }
+
     // MARK: - Cookie values
 
     /// Puts cookies and their values on the clipboard. This is the only place cookie values are read.
