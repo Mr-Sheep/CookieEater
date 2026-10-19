@@ -134,7 +134,10 @@ final class AppModel {
     }
 
     var hasAutomaticCleanups: Bool {
-        browsers.contains { settings.automation(for: $0.id).isActive }
+        browsers.contains { browser in
+            let options = settings.automation(for: browser.id)
+            return options.isActive && browser.profiles.contains(where: options.cleans)
+        }
     }
 
     // MARK: - Settings
@@ -415,7 +418,9 @@ final class AppModel {
 
     private func automaticRequest(for browser: InstalledBrowser) -> CleanupRequest? {
         let options = settings.automation(for: browser.id)
-        var request = CleanupRequest(browser: browser.definition, profiles: browser.profiles)
+        guard browser.profiles.contains(where: options.cleans) else { return nil }
+        var request = CleanupRequest(browser: browser.definition, profiles: browser.profiles,
+                                     skippedProfileIDs: options.skippedProfiles)
         // Data the user hasn't allowed CookieEater to open is skipped.
         for kind in DataKind.allCases where options[kind] && !isBlocked(kind, browserID: browser.id) {
             let exceptions = exceptionList(for: kind)

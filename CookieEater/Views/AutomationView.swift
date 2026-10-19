@@ -2,7 +2,11 @@ import ServiceManagement
 import SwiftUI
 
 struct AutomationView: View {
+    private static let disclosureWidth: CGFloat = 12
+
     @Environment(AppModel.self) private var model
+    /// Browsers whose profiles are shown.
+    @State private var expandedBrowserIDs: Set<String> = []
 
     var body: some View {
         @Bindable var model = model
@@ -48,15 +52,20 @@ struct AutomationView: View {
                         .foregroundStyle(.secondary)
                         ForEach(model.browsers) { browser in
                             GridRow {
-                                Label {
-                                    Text(browser.name)
-                                } icon: {
-                                    BrowserIcon(definition: browser.definition)
-                                }
+                                browserLabel(browser)
                                 automationToggle("Cookies", browser, .cookies)
                                 automationToggle("History", browser, .history)
                                 automationToggle("Cache", browser, .cache)
                                 allAutomationToggle(browser)
+                            }
+                            if expandedBrowserIDs.contains(browser.id) {
+                                ForEach(browser.profiles) { profile in
+                                    GridRow {
+                                        // Lines the checkbox up with the browser's icon.
+                                        profileToggle(profile, of: browser)
+                                            .padding(.leading, Self.disclosureWidth + 6)
+                                    }
+                                }
                             }
                         }
                     }
@@ -124,6 +133,55 @@ struct AutomationView: View {
         })
         .toggleStyle(.checkbox)
         .labelsHidden()
+    }
+
+    /// The browser's name, which shows or hides the profiles to clean below it.
+    private func browserLabel(_ browser: InstalledBrowser) -> some View {
+        let isExpanded = expandedBrowserIDs.contains(browser.id)
+        return Button {
+            if isExpanded {
+                expandedBrowserIDs.remove(browser.id)
+            } else {
+                expandedBrowserIDs.insert(browser.id)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .frame(width: Self.disclosureWidth)
+                BrowserIcon(definition: browser.definition)
+                Text(browser.name)
+                if let summary = skippedProfilesSummary(browser) {
+                    Text(summary)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(isExpanded ? "Hide profiles" : "Choose which profiles are cleaned")
+    }
+
+    /// "1 of 3 profiles" when some profiles are left alone, so it shows while the profiles are hidden.
+    private func skippedProfilesSummary(_ browser: InstalledBrowser) -> String? {
+        let cleaned = browser.profiles.filter(model.settings.automation(for: browser.id).cleans).count
+        guard cleaned < browser.profiles.count else { return nil }
+        return cleaned == 0 ? "No profiles" : "\(cleaned) of \(browser.profiles.count) profiles"
+    }
+
+    private func profileToggle(_ profile: BrowserProfile, of browser: InstalledBrowser) -> some View {
+        Toggle(profile.name, isOn: Binding {
+            model.settings.automation(for: browser.id).cleans(profile)
+        } set: { isOn in
+            if isOn {
+                model.settings.automation[browser.id, default: BrowserAutomation()].skippedProfiles.remove(profile.id)
+            } else {
+                model.settings.automation[browser.id, default: BrowserAutomation()].skippedProfiles.insert(profile.id)
+            }
+        })
+        .toggleStyle(.checkbox)
     }
 
     private func isAutomated(_ kind: DataKind, _ browser: InstalledBrowser) -> Bool {

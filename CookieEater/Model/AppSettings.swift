@@ -5,8 +5,25 @@ struct BrowserAutomation: Codable, Equatable, Sendable {
     var cookies = true
     var history = false
     var cache = false
+    /// `BrowserProfile.id`s of profiles that are left alone. Profiles added later are cleaned.
+    var skippedProfiles: Set<String> = []
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = BrowserAutomation()
+        cookies = try container.decodeIfPresent(Bool.self, forKey: .cookies) ?? defaults.cookies
+        history = try container.decodeIfPresent(Bool.self, forKey: .history) ?? defaults.history
+        cache = try container.decodeIfPresent(Bool.self, forKey: .cache) ?? defaults.cache
+        skippedProfiles = try container.decodeIfPresent(Set<String>.self, forKey: .skippedProfiles) ?? defaults.skippedProfiles
+    }
 
     var isActive: Bool { cookies || history || cache }
+
+    func cleans(_ profile: BrowserProfile) -> Bool {
+        !skippedProfiles.contains(profile.id)
+    }
 
     subscript(kind: DataKind) -> Bool {
         get {

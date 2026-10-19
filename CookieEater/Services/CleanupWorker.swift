@@ -4,6 +4,9 @@ import Foundation
 struct CleanupRequest: Sendable {
     let browser: BrowserDefinition
     let profiles: [BrowserProfile]
+    /// Profiles in `profiles` whose data is left alone. They stay listed so cache folders that profiles share are
+    /// attributed correctly.
+    var skippedProfileIDs: Set<String> = []
     /// Which items to remove, for each kind of data to clean. Kinds that are missing are left alone.
     var removals: [DataKind: @Sendable (any SiteData) -> Bool] = [:]
 }
@@ -45,15 +48,18 @@ actor CleanupWorker {
             }
         }
 
+        // Skipped profiles aren't touched at all: even removing nothing from an empty history clears derived files.
+        let skipped = request.skippedProfileIDs
+        let profiles = request.profiles.filter { !skipped.contains($0.id) }
         if let shouldRemove = request.removals[.cookies] {
-            for profile in request.profiles where profile.cookiesFile != nil {
+            for profile in profiles where profile.cookiesFile != nil {
                 attempt("Cookies", profile: profile) {
                     report.cookiesRemoved += try engine.removeCookies(in: profile) { shouldRemove($0) }
                 }
             }
         }
         if let shouldRemove = request.removals[.history] {
-            for profile in request.profiles where profile.historyFile != nil {
+            for profile in profiles where profile.historyFile != nil {
                 attempt("History", profile: profile) {
                     report.historyItemsRemoved += try engine.removeHistory(in: profile) { shouldRemove($0) }
                 }
@@ -61,7 +67,9 @@ actor CleanupWorker {
         }
         if let shouldRemove = request.removals[.cache] {
             attempt("Cache") {
-                report.cacheBytesFreed += try removeCache(of: engine, profiles: request.profiles, where: shouldRemove)
+                report.cacheBytesFreed += try removeCache(of: engine, profiles: request.profiles) {
+                    !skipped.contains($0.profileID) && shouldRemove($0)
+                }
             }
         }
         return report
