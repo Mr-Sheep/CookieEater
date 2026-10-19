@@ -16,9 +16,8 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
-                Section("Cookies") {
+                Section {
                     Label("All Browsers", systemImage: "square.stack.3d.up")
-                        .badge(model.cookies.count)
                         .tag(SidebarItem.allBrowsers)
                     ForEach(model.browsers) { browser in
                         BrowserSidebarRow(browser: browser)
@@ -100,7 +99,6 @@ private struct BrowserSidebarRow: View {
         } icon: {
             BrowserIcon(definition: browser.definition)
         }
-        .badge(model.cookies.count { $0.browserID == browser.id })
         .contextMenu {
             Button("Exclude \(browser.name)") {
                 model.setExcluded(true, browserID: browser.id)
