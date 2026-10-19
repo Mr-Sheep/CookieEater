@@ -30,7 +30,7 @@ struct BrowsersView: View {
             } header: {
                 Text("Browsers on This Mac")
             } footer: {
-                Text("Turn off a browser to exclude it. CookieEater doesn’t read an excluded browser’s cookies or history, and never cleans it, by hand or automatically.")
+                Text("Turn off a browser to exclude it. CookieEater doesn't read an excluded browser's cookies or history, and never cleans it, by hand or automatically.")
             }
         }
         .formStyle(.grouped)

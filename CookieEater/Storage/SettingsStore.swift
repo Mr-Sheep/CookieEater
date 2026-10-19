@@ -45,7 +45,7 @@ enum SettingsStore {
         do {
             return try decoder.decode(Value.self, from: data)
         } catch {
-            logger.error("Couldn’t read \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            logger.error("Couldn't read \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -58,7 +58,7 @@ enum SettingsStore {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try encoder.encode(value).write(to: url, options: .atomic)
         } catch {
-            logger.error("Couldn’t save \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            logger.error("Couldn't save \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 }

@@ -222,9 +222,9 @@ final class AppModel {
 
     private func accessMessage(for kind: DataKind, browserName: String) -> String {
         switch kind {
-        case .cookies: "Click Allow to let CookieEater read and remove \(browserName)’s cookies, which are kept in this folder."
-        case .history: "Click Allow to let CookieEater read and clear \(browserName)’s history."
-        case .cache: "Click Allow to let CookieEater measure and clear \(browserName)’s cache."
+        case .cookies: "Click Allow to let CookieEater read and remove \(browserName)'s cookies, which are kept in this folder."
+        case .history: "Click Allow to let CookieEater read and clear \(browserName)'s history."
+        case .cache: "Click Allow to let CookieEater measure and clear \(browserName)'s cache."
         }
     }
 
@@ -253,7 +253,7 @@ final class AppModel {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            record(ActivityEntry(message: "Couldn’t change the login item", details: [error.localizedDescription], isError: true))
+            record(ActivityEntry(message: "Couldn't change the login item", details: [error.localizedDescription], isError: true))
         }
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
@@ -371,7 +371,7 @@ final class AppModel {
         quitPrompt = nil
         Task {
             guard await quit(prompt.browsers) else {
-                record(ActivityEntry(message: "\(prompt.browserNames) didn’t quit, so nothing was removed",
+                record(ActivityEntry(message: "\(prompt.browserNames) didn't quit, so nothing was removed",
                                      details: ["Quit it yourself and try again."], isError: true))
                 return
             }

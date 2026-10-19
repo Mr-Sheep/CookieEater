@@ -118,7 +118,7 @@ struct CookieTable: SiteDataTable {
                 Button("Remove Cookies…", role: .destructive) { remove(ids) }
             }
         }
-        .alert("Couldn’t Copy",
+        .alert("Couldn't Copy",
                isPresented: Binding(get: { copyError != nil }, set: { if !$0 { copyError = nil } }),
                presenting: copyError) { _ in
         } message: { message in

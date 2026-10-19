@@ -49,7 +49,7 @@ struct ContentView: View {
             Button("Quit and Continue") { model.confirmQuit(prompt) }
             Button("Cancel", role: .cancel) { model.quitPrompt = nil }
         } message: { prompt in
-            Text("\(prompt.browserNames) keeps this data in memory while it’s open and would write it back. CookieEater will quit it, then finish removing the data.")
+            Text("\(prompt.browserNames) keeps this data in memory while it's open and would write it back. CookieEater will quit it, then finish removing the data.")
         }
         .onChange(of: model.browsers.map(\.id)) { _, ids in
             // The selected browser was excluded or uninstalled.

@@ -45,7 +45,7 @@ final class SQLiteDatabase {
         guard status == SQLITE_OK, let db else {
             let reason = db.map { String(cString: sqlite3_errmsg($0)) } ?? "error \(status)"
             sqlite3_close(db)
-            throw SQLiteError(message: "Couldn’t open \(url.lastPathComponent): \(reason)")
+            throw SQLiteError(message: "Couldn't open \(url.lastPathComponent): \(reason)")
         }
         self.url = url
         handle = db

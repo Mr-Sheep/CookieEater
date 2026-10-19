@@ -243,7 +243,7 @@ struct SiteDataView<Details: SiteDataTable>: View {
             ContentUnavailableView {
                 Label("No Access", systemImage: "lock")
             } description: {
-                Text("macOS protects \(browser.name)’s \(noun). Allow CookieEater to open the folder where it’s kept.")
+                Text("macOS protects \(browser.name)'s \(noun). Allow CookieEater to open the folder where it's kept.")
             } actions: {
                 Button("Allow Access…") { model.ensureAccess([kind], for: browser) }
             }
@@ -252,7 +252,7 @@ struct SiteDataView<Details: SiteDataTable>: View {
         } else {
             ContentUnavailableView(searchText.isEmpty ? "No \(kind.title)" : "No Matching Sites",
                                    systemImage: "tray",
-                                   description: Text(searchText.isEmpty ? "There’s nothing to show here." : "Try a different search."))
+                                   description: Text(searchText.isEmpty ? "There's nothing to show here." : "Try a different search."))
         }
     }
 
@@ -278,7 +278,7 @@ struct SiteDataView<Details: SiteDataTable>: View {
                 Button {
                     showsProblems = true
                 } label: {
-                    Label("\(problems.count) couldn’t be read", systemImage: "exclamationmark.triangle.fill")
+                    Label("\(problems.count) couldn't be read", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 }
                 .buttonStyle(.borderless)
@@ -367,9 +367,9 @@ struct SiteDataView<Details: SiteDataTable>: View {
 
     private var dialogMessage: String {
         switch kind {
-        case .history: "Visited pages are removed. Bookmarks are kept. This can’t be undone."
+        case .history: "Visited pages are removed. Bookmarks are kept. This can't be undone."
         case .cache: "Pages may load more slowly the first time you visit them again."
-        case .cookies: "You’ll be signed out of the affected sites. This can’t be undone."
+        case .cookies: "You'll be signed out of the affected sites. This can't be undone."
         }
     }
 }
@@ -482,9 +482,9 @@ private struct FolderAccessBanner: View {
                 .font(.title2)
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Allow access to \(browser.name)’s \(blocked.map { $0.title.lowercased() }.formatted(.list(type: .and)))")
+                Text("Allow access to \(browser.name)'s \(blocked.map { $0.title.lowercased() }.formatted(.list(type: .and)))")
                     .font(.headline)
-                Text("macOS protects \(browser.name)’s data, which is kept in several folders. Click Allow Access, then click Allow in each window that opens.")
+                Text("macOS protects \(browser.name)'s data, which is kept in several folders. Click Allow Access, then click Allow in each window that opens.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

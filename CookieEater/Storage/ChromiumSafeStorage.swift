@@ -24,7 +24,7 @@ enum ChromiumSafeStorage {
             if let password = result as? Data { return password }
             throw CookieValueError("The keychain returned no password for “\(service)”.")
         case errSecItemNotFound:
-            throw CookieValueError("“\(service)” isn’t in your keychain, so the value can’t be decrypted.")
+            throw CookieValueError("“\(service)” isn't in your keychain, so the value can't be decrypted.")
         case errSecUserCanceled, errSecAuthFailed:
             throw CookieValueError("The value is encrypted with a password kept in your keychain as “\(service)”. Allow CookieEater to use it to copy the value.")
         default:
@@ -34,7 +34,7 @@ enum ChromiumSafeStorage {
 
     static func decrypt(_ encrypted: Data, password: Data, domain: String) throws -> String {
         guard encrypted.starts(with: "v10".utf8) else {
-            throw CookieValueError("The value is encrypted in a format CookieEater doesn’t know.")
+            throw CookieValueError("The value is encrypted in a format CookieEater doesn't know.")
         }
         var plaintext = try aesDecrypt(encrypted.dropFirst(3), key: key(from: password))
         let digest = sha256(Data(domain.utf8))
@@ -42,7 +42,7 @@ enum ChromiumSafeStorage {
             plaintext.removeFirst(digest.count)
         }
         guard let value = String(data: plaintext, encoding: .utf8) else {
-            throw CookieValueError("The value isn’t text.")
+            throw CookieValueError("The value isn't text.")
         }
         return value
     }
@@ -57,7 +57,7 @@ enum ChromiumSafeStorage {
                                      key.bindMemory(to: UInt8.self).baseAddress, kCCKeySizeAES128)
             }
         }
-        guard status == kCCSuccess else { throw CookieValueError("Couldn’t derive the decryption key.") }
+        guard status == kCCSuccess else { throw CookieValueError("Couldn't derive the decryption key.") }
         return key
     }
 
@@ -75,7 +75,7 @@ enum ChromiumSafeStorage {
             }
         }
         guard status == kCCSuccess else {
-            throw CookieValueError("The value couldn’t be decrypted with the password from your keychain.")
+            throw CookieValueError("The value couldn't be decrypted with the password from your keychain.")
         }
         return output.prefix(length)
     }

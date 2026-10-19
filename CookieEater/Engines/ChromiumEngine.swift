@@ -105,7 +105,7 @@ struct ChromiumEngine: BrowserEngine {
 
     private func safeStoragePassword() throws -> Data {
         guard let service = browser.safeStorageService else {
-            throw CookieValueError("CookieEater doesn’t know where \(browser.name) keeps its encryption password.")
+            throw CookieValueError("CookieEater doesn't know where \(browser.name) keeps its encryption password.")
         }
         return try ChromiumSafeStorage.password(service: service)
     }
