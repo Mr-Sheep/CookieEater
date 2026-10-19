@@ -5,7 +5,8 @@ import Foundation
 /// File layout (big-endian): the "cook" magic, the page count, each page's size, the pages,
 /// a checksum, then a trailer (a fixed footer followed by a binary plist of cookie settings).
 /// Each page (little-endian) starts with the tag 0x00000100, a record count and the record offsets.
-/// Each record stores its size, flags, string offsets, expiry and creation dates (seconds since 2001),
+/// Each record stores its size, flags, the offsets of its strings (domain at 16, name at 20, path at 24, value at 28),
+/// expiry and creation dates (seconds since 2001),
 /// followed by the NUL-terminated domain, name, path and value strings.
 struct BinaryCookieFile {
     struct Record {
@@ -19,6 +20,12 @@ struct BinaryCookieFile {
 
         var isSecure: Bool { flags & 0x1 != 0 }
         var isHTTPOnly: Bool { flags & 0x4 != 0 }
+
+        /// Read from `bytes` only when asked for, so listing cookies never reads their values.
+        func value() throws -> String {
+            let record = [UInt8](bytes)
+            return try BinaryCookieFile.string(record, at: Int(BinaryCookieFile.littleEndian(record, at: 28)))
+        }
     }
 
     struct FormatError: LocalizedError {

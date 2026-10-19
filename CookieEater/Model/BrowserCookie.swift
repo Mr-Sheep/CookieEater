@@ -1,6 +1,6 @@
 import Foundation
 
-/// A cookie stored by one browser profile. Cookie values are never read.
+/// A cookie stored by one browser profile. Its value isn't part of it: a value is read only when the user copies it.
 struct BrowserCookie: Identifiable, Hashable, Sendable {
     let browserID: String
     let profileID: String
@@ -35,6 +35,14 @@ struct BrowserCookie: Identifiable, Hashable, Sendable {
         host = Domain.host(fromCookieDomain: domain)
         site = Domain.site(for: host)
         id = [profileID, domain, name, path, partition].joined(separator: "\u{1F}")
+    }
+}
+
+struct CookieValueError: LocalizedError {
+    let errorDescription: String?
+
+    init(_ message: String) {
+        errorDescription = message
     }
 }
 

@@ -49,6 +49,19 @@ struct SafariEngine: BrowserEngine {
         return removed
     }
 
+    func cookieValues(of cookies: [BrowserCookie], in profile: BrowserProfile) throws -> [String: String] {
+        guard let url = profile.cookiesFile, FileTools.exists(url) else { return [:] }
+        let wanted = Set(cookies.map(\.id))
+        var values: [String: String] = [:]
+        for record in try BinaryCookieFile(data: Data(contentsOf: url)).records {
+            let id = cookie(from: record, in: profile).id
+            if wanted.contains(id) {
+                values[id] = try record.value()
+            }
+        }
+        return values
+    }
+
     func history(in profile: BrowserProfile) throws -> [HistoryEntry] {
         guard let url = profile.historyFile, FileTools.isNonEmptyFile(url) else { return [] }
         return try FileTools.readSQLiteSnapshot(url) { db in

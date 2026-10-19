@@ -44,6 +44,8 @@ struct BrowserDefinition: Identifiable, Hashable, Sendable {
     let cachePaths: [String]
     /// Safari only: the folder outside the app container that holds History.db.
     var historyPath: String? = nil
+    /// Chromium only: the keychain item holding the password its cookie values are encrypted with.
+    var safeStorageService: String? = nil
     /// Ships with macOS, so it is listed even before its data folder can be read.
     var isBuiltIn = false
 
@@ -76,10 +78,13 @@ struct BrowserDefinition: Identifiable, Hashable, Sendable {
 }
 
 extension BrowserDefinition {
-    private static func chromium(_ id: String, _ name: String, bundleID: String, folder: String, cacheFolder: String? = nil) -> BrowserDefinition {
+    /// `keychainName` defaults to `name`, giving e.g. "Brave Safe Storage".
+    private static func chromium(_ id: String, _ name: String, bundleID: String, folder: String, cacheFolder: String? = nil,
+                                 keychainName: String? = nil) -> BrowserDefinition {
         BrowserDefinition(id: id, name: name, family: .chromium, bundleIDs: [bundleID],
                           dataPath: "Library/Application Support/\(folder)",
-                          cachePaths: ["Library/Caches/\(cacheFolder ?? folder)"])
+                          cachePaths: ["Library/Caches/\(cacheFolder ?? folder)"],
+                          safeStorageService: "\(keychainName ?? name) Safe Storage")
     }
 
     private static func firefox(_ id: String, _ name: String, bundleIDs: [String], folder: String) -> BrowserDefinition {
@@ -103,10 +108,13 @@ extension BrowserDefinition {
                                        "Library/Containers/com.apple.SafariTechnologyPreview/Data/Library/Caches/com.apple.SafariTechnologyPreview"],
                           historyPath: "Library/SafariTechnologyPreview"),
 
-        chromium("chrome", "Google Chrome", bundleID: "com.google.Chrome", folder: "Google/Chrome"),
-        chromium("chrome-beta", "Google Chrome Beta", bundleID: "com.google.Chrome.beta", folder: "Google/Chrome Beta"),
-        chromium("chrome-dev", "Google Chrome Dev", bundleID: "com.google.Chrome.dev", folder: "Google/Chrome Dev"),
-        chromium("chrome-canary", "Google Chrome Canary", bundleID: "com.google.Chrome.canary", folder: "Google/Chrome Canary"),
+        chromium("chrome", "Google Chrome", bundleID: "com.google.Chrome", folder: "Google/Chrome", keychainName: "Chrome"),
+        chromium("chrome-beta", "Google Chrome Beta", bundleID: "com.google.Chrome.beta", folder: "Google/Chrome Beta",
+                 keychainName: "Chrome"),
+        chromium("chrome-dev", "Google Chrome Dev", bundleID: "com.google.Chrome.dev", folder: "Google/Chrome Dev",
+                 keychainName: "Chrome"),
+        chromium("chrome-canary", "Google Chrome Canary", bundleID: "com.google.Chrome.canary", folder: "Google/Chrome Canary",
+                 keychainName: "Chrome"),
         chromium("chromium", "Chromium", bundleID: "org.chromium.Chromium", folder: "Chromium"),
         chromium("edge", "Microsoft Edge", bundleID: "com.microsoft.edgemac", folder: "Microsoft Edge"),
         chromium("brave", "Brave", bundleID: "com.brave.Browser", folder: "BraveSoftware/Brave-Browser"),

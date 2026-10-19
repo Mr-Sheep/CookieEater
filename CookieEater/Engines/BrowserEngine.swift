@@ -14,6 +14,10 @@ protocol BrowserEngine: Sendable {
     /// Returns the number of cookies removed.
     func removeCookies(in profile: BrowserProfile, where shouldRemove: (BrowserCookie) -> Bool) throws -> Int
 
+    /// Reads the values of `cookies`, decrypting them if needed, keyed by cookie ID.
+    /// Cookies that no longer exist are left out.
+    func cookieValues(of cookies: [BrowserCookie], in profile: BrowserProfile) throws -> [String: String]
+
     /// The pages in the profile's history.
     func history(in profile: BrowserProfile) throws -> [HistoryEntry]
 

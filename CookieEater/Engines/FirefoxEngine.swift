@@ -68,6 +68,19 @@ struct FirefoxEngine: BrowserEngine {
         return ids.count
     }
 
+    func cookieValues(of cookies: [BrowserCookie], in profile: BrowserProfile) throws -> [String: String] {
+        guard let url = profile.cookiesFile else { return [:] }
+        let wanted = Set(cookies.map(\.id))
+        return try FileTools.readSQLiteSnapshot(url) { db in
+            var values: [String: String] = [:]
+            try forEachCookie(in: db, profile: profile) { id, cookie in
+                guard wanted.contains(cookie.id) else { return }
+                try db.forEachRow("SELECT value FROM moz_cookies WHERE id = ?", binding: id) { values[cookie.id] = $0.string(0) }
+            }
+            return values
+        }
+    }
+
     func history(in profile: BrowserProfile) throws -> [HistoryEntry] {
         guard let url = profile.historyFile else { return [] }
         return try FileTools.readSQLiteSnapshot(url) { db in

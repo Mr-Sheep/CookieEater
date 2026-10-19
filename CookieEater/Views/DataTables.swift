@@ -81,6 +81,7 @@ struct CacheTable: SiteDataTable {
 struct CookieTable: SiteDataTable {
     @Environment(AppModel.self) private var model
     @Binding var selection: Set<String>
+    @State private var copyError: String?
     private let cookies: [BrowserCookie]
     private let remove: (Set<String>) -> Void
 
@@ -102,8 +103,35 @@ struct CookieTable: SiteDataTable {
             TableColumn("Browser") { Text(model.sourceName(for: $0)) }
         }
         .contextMenu(forSelectionType: String.self) { ids in
+            // Clicking outside the rows copies every cookie listed.
+            let chosen = ids.isEmpty ? cookies : cookies.filter { ids.contains($0.id) }
+            if chosen.count == 1 {
+                Button("Copy Value") { copy(chosen, as: .value) }
+                Button("Copy as name=value") { copy(chosen, as: .pair) }
+            }
+            if !chosen.isEmpty {
+                Button(ids.isEmpty ? "Copy All as Cookie Header" : "Copy as Cookie Header") { copy(chosen, as: .header) }
+                Button(ids.isEmpty ? "Copy All as JSON" : "Copy as JSON") { copy(chosen, as: .json) }
+            }
             if !ids.isEmpty {
+                Divider()
                 Button("Remove Cookies…", role: .destructive) { remove(ids) }
+            }
+        }
+        .alert("Couldn’t Copy",
+               isPresented: Binding(get: { copyError != nil }, set: { if !$0 { copyError = nil } }),
+               presenting: copyError) { _ in
+        } message: { message in
+            Text(message)
+        }
+    }
+
+    private func copy(_ cookies: [BrowserCookie], as format: CookieCopyFormat) {
+        Task {
+            do {
+                try await model.copy(cookies, as: format)
+            } catch {
+                copyError = error.localizedDescription
             }
         }
     }

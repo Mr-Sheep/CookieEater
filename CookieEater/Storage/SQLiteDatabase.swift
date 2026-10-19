@@ -25,6 +25,11 @@ final class SQLiteDatabase {
             return String(cString: text)
         }
 
+        func data(_ column: Int32) -> Data {
+            guard let bytes = sqlite3_column_blob(statement, column) else { return Data() }
+            return Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, column)))
+        }
+
         func isNull(_ column: Int32) -> Bool {
             sqlite3_column_type(statement, column) == SQLITE_NULL
         }
@@ -63,13 +68,15 @@ final class SQLiteDatabase {
     func forEachRow(_ sql: String, _ body: (Row) throws -> Void) throws {
         let statement = try prepare(sql)
         defer { sqlite3_finalize(statement) }
-        while true {
-            switch sqlite3_step(statement) {
-            case SQLITE_ROW: try body(Row(statement: statement))
-            case SQLITE_DONE: return
-            default: throw lastError
-            }
-        }
+        try step(statement, body)
+    }
+
+    /// Like `forEachRow(_:_:)`, with `value` bound to the statement's single parameter.
+    func forEachRow(_ sql: String, binding value: Int64, _ body: (Row) throws -> Void) throws {
+        let statement = try prepare(sql)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, value)
+        try step(statement, body)
     }
 
     func scalarInt(_ sql: String) throws -> Int {
@@ -130,6 +137,16 @@ final class SQLiteDatabase {
         var names = Set<String>()
         try forEachRow("PRAGMA table_info(\"\(table)\")") { names.insert($0.string(1)) }
         return names
+    }
+
+    private func step(_ statement: OpaquePointer, _ body: (Row) throws -> Void) throws {
+        while true {
+            switch sqlite3_step(statement) {
+            case SQLITE_ROW: try body(Row(statement: statement))
+            case SQLITE_DONE: return
+            default: throw lastError
+            }
+        }
     }
 
     private func prepare(_ sql: String) throws -> OpaquePointer {

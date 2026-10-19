@@ -311,6 +311,29 @@ final class AppModel {
                title: "Removed \(kind.title.lowercased()) not on the exception list")
     }
 
+    // MARK: - Cookie values
+
+    /// Puts cookies and their values on the clipboard. This is the only place cookie values are read.
+    /// Cookies that no longer exist are left out.
+    func copy(_ cookies: [BrowserCookie], as format: CookieCopyFormat) async throws {
+        let sources = Dictionary(grouping: cookies, by: \.profileID).compactMap { profileID, cookies in
+            browser(withID: cookies[0].browserID).flatMap { browser in
+                browser.profiles.first { $0.id == profileID }.map { (engine: browser.definition.makeEngine(), profile: $0, cookies: cookies) }
+            }
+        }
+        let values = try await Task.detached(priority: .userInitiated) {
+            try sources.reduce(into: [String: String]()) { values, source in
+                values.merge(try source.engine.cookieValues(of: source.cookies, in: source.profile)) { $1 }
+            }
+        }.value
+        guard !values.isEmpty else {
+            throw CookieValueError(cookies.count == 1 ? "The cookie no longer exists. Reload to see the current cookies."
+                                                      : "These cookies no longer exist. Reload to see the current cookies.")
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(format.text(for: cookies, values: values), forType: .string)
+    }
+
     func confirmQuit(_ prompt: QuitPrompt) {
         quitPrompt = nil
         Task {

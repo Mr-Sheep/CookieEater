@@ -75,6 +75,41 @@ struct ChromiumEngine: BrowserEngine {
         return rowIDs.count
     }
 
+    func cookieValues(of cookies: [BrowserCookie], in profile: BrowserProfile) throws -> [String: String] {
+        guard let url = profile.cookiesFile else { return [:] }
+        let wanted = Set(cookies.map(\.id))
+        let stored = try FileTools.readSQLiteSnapshot(url) { db in
+            var stored: [(cookie: BrowserCookie, value: String, encrypted: Data)] = []
+            try forEachCookie(in: db, profile: profile) { rowID, cookie in
+                guard wanted.contains(cookie.id) else { return }
+                try db.forEachRow("SELECT value, encrypted_value FROM cookies WHERE rowid = ?", binding: rowID) { row in
+                    stored.append((cookie, row.string(0), row.data(1)))
+                }
+            }
+            return stored
+        }
+        // Values are stored in plain text only by old versions. The password is asked for once, when first needed.
+        var password: Data?
+        var values: [String: String] = [:]
+        for (cookie, value, encrypted) in stored {
+            guard value.isEmpty, !encrypted.isEmpty else {
+                values[cookie.id] = value
+                continue
+            }
+            let key = try password ?? safeStoragePassword()
+            password = key
+            values[cookie.id] = try ChromiumSafeStorage.decrypt(encrypted, password: key, domain: cookie.domain)
+        }
+        return values
+    }
+
+    private func safeStoragePassword() throws -> Data {
+        guard let service = browser.safeStorageService else {
+            throw CookieValueError("CookieEater doesn’t know where \(browser.name) keeps its encryption password.")
+        }
+        return try ChromiumSafeStorage.password(service: service)
+    }
+
     func history(in profile: BrowserProfile) throws -> [HistoryEntry] {
         guard let url = profile.historyFile else { return [] }
         return try FileTools.readSQLiteSnapshot(url) { db in
