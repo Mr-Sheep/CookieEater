@@ -8,6 +8,9 @@ struct AutomationView: View {
     @Environment(AppModel.self) private var model
     /// Browsers whose profiles are shown.
     @State private var expandedBrowserIDs: Set<String> = []
+    /// Options waiting for their folders to be allowed, by browser ID. A checkbox that changes several profiles or kinds
+    /// of data asks for all of their folders at once.
+    @State private var awaitingAccess: [String: [(kind: DataKind, profileID: String?)]] = [:]
 
     var body: some View {
         @Bindable var model = model
@@ -55,17 +58,15 @@ struct AutomationView: View {
                         ForEach(model.browsers) { browser in
                             GridRow {
                                 browserLabel(browser)
-                                automationToggle("Cookies", browser, .cookies)
-                                automationToggle("History", browser, .history)
-                                automationToggle("Cache", browser, .cache)
-                                allAutomationToggle(browser)
+                                automationToggles(browser, profile: nil)
                             }
-                            if expandedBrowserIDs.contains(browser.id) {
+                            if browser.profiles.count > 1 && expandedBrowserIDs.contains(browser.id) {
                                 ForEach(browser.profiles) { profile in
                                     GridRow {
-                                        // Lines the checkbox up with the browser's icon.
-                                        profileToggle(profile, of: browser)
+                                        // Lines the name up with the browser's icon.
+                                        Text(profile.name)
                                             .padding(.leading, Self.disclosureWidth + 6)
+                                        automationToggles(browser, profile: profile)
                                     }
                                 }
                             }
@@ -115,92 +116,85 @@ struct AutomationView: View {
         }
     }
 
-    private func automationToggle(_ title: String, _ browser: InstalledBrowser, _ kind: DataKind) -> some View {
-        Toggle(title, isOn: Binding {
-            isAutomated(kind, browser)
-        } set: { isOn in
-            setAutomation([kind], isOn, for: browser)
-        })
-        .toggleStyle(.checkbox)
-        .labelsHidden()
+    /// The checkboxes for one profile, or for every profile of the browser when `profile` is nil. A browser's checkbox
+    /// is mixed when its profiles differ, and changes all of them, including profiles added later.
+    @ViewBuilder
+    private func automationToggles(_ browser: InstalledBrowser, profile: BrowserProfile?) -> some View {
+        automationToggle("Cookies", [.cookies], browser, profile: profile)
+        automationToggle("History", [.history], browser, profile: profile)
+        automationToggle("Cache", [.cache], browser, profile: profile)
+        // Turns every kind of data on when any of them is off, and all of them off when they're all on.
+        automationToggle("All", DataKind.allCases, browser, profile: profile)
     }
 
-    /// Turns every kind of data on when any of them is off, and all of them off when they're all on.
-    private func allAutomationToggle(_ browser: InstalledBrowser) -> some View {
-        Toggle("All", isOn: Binding {
-            DataKind.allCases.allSatisfy { isAutomated($0, browser) }
-        } set: { isOn in
-            setAutomation(DataKind.allCases, isOn, for: browser)
-        })
-        .toggleStyle(.checkbox)
-        .labelsHidden()
-    }
-
-    /// The browser's name, which shows or hides the profiles to clean below it.
-    private func browserLabel(_ browser: InstalledBrowser) -> some View {
-        let isExpanded = expandedBrowserIDs.contains(browser.id)
-        return Button {
-            if isExpanded {
-                expandedBrowserIDs.remove(browser.id)
-            } else {
-                expandedBrowserIDs.insert(browser.id)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .frame(width: Self.disclosureWidth)
-                BrowserIcon(definition: browser.definition)
-                Text(browser.name)
-                if let summary = skippedProfilesSummary(browser) {
-                    Text(summary)
-                        .foregroundStyle(.secondary)
+    private func automationToggle(_ title: String, _ kinds: [DataKind], _ browser: InstalledBrowser,
+                                  profile: BrowserProfile?) -> some View {
+        let shownProfiles = profile.map { [$0] } ?? browser.profiles
+        let sources = shownProfiles.flatMap { shown in
+            kinds.map { kind in
+                Binding {
+                    isAutomated(kind, in: shown, of: browser)
+                } set: { isOn in
+                    setAutomation(kind, isOn, inProfile: profile?.id, of: browser)
                 }
             }
-            .contentShape(.rect)
         }
-        .buttonStyle(.plain)
-        .help(isExpanded ? "Hide profiles" : "Choose which profiles are cleaned")
+        return Toggle(title, sources: sources, isOn: \.self)
+            .toggleStyle(.checkbox)
+            .labelsHidden()
     }
 
-    /// "1 of 3 profiles" when some profiles are left alone, so it shows while the profiles are hidden.
-    private func skippedProfilesSummary(_ browser: InstalledBrowser) -> String? {
-        let cleaned = browser.profiles.filter(model.settings.automation(for: browser.id).cleans).count
-        guard cleaned < browser.profiles.count else { return nil }
-        return cleaned == 0 ? "No profiles" : "\(cleaned) of \(browser.profiles.count) profiles"
-    }
-
-    private func profileToggle(_ profile: BrowserProfile, of browser: InstalledBrowser) -> some View {
-        Toggle(profile.name, isOn: Binding {
-            model.settings.automation(for: browser.id).cleans(profile)
-        } set: { isOn in
-            if isOn {
-                model.settings.automation[browser.id, default: BrowserAutomation()].skippedProfiles.remove(profile.id)
-            } else {
-                model.settings.automation[browser.id, default: BrowserAutomation()].skippedProfiles.insert(profile.id)
+    /// The browser's name, which shows or hides its profiles below it when it has several.
+    @ViewBuilder
+    private func browserLabel(_ browser: InstalledBrowser) -> some View {
+        let isExpanded = expandedBrowserIDs.contains(browser.id)
+        let label = HStack(spacing: 6) {
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                .frame(width: Self.disclosureWidth)
+                .opacity(browser.profiles.count > 1 ? 1 : 0)
+            BrowserIcon(definition: browser.definition)
+            Text(browser.name)
+        }
+        if browser.profiles.count > 1 {
+            Button {
+                if isExpanded {
+                    expandedBrowserIDs.remove(browser.id)
+                } else {
+                    expandedBrowserIDs.insert(browser.id)
+                }
+            } label: {
+                label.contentShape(.rect)
             }
-        })
-        .toggleStyle(.checkbox)
-    }
-
-    private func isAutomated(_ kind: DataKind, _ browser: InstalledBrowser) -> Bool {
-        // Data CookieEater isn't allowed to open is never cleaned, so it shows as off.
-        model.settings.automation(for: browser.id)[kind] && !model.isBlocked(kind, browserID: browser.id)
-    }
-
-    private func setAutomation(_ kinds: [DataKind], _ isOn: Bool, for browser: InstalledBrowser) {
-        let blocked = isOn ? kinds.filter { model.isBlocked($0, browserID: browser.id) } : []
-        for kind in kinds where !blocked.contains(kind) {
-            model.settings.automation[browser.id, default: BrowserAutomation()][kind] = isOn
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Hide profiles" : "Choose what is cleaned in each profile")
+        } else {
+            label
         }
-        guard !blocked.isEmpty else { return }
-        // Ask for the folders outside the toggle's action; each checkbox turns on once its access is allowed.
+    }
+
+    private func isAutomated(_ kind: DataKind, in profile: BrowserProfile, of browser: InstalledBrowser) -> Bool {
+        // Data CookieEater isn't allowed to open is never cleaned, so it shows as off.
+        model.settings.automation(for: browser.id)[profile][kind] && !model.isBlocked(kind, browserID: browser.id)
+    }
+
+    private func setAutomation(_ kind: DataKind, _ isOn: Bool, inProfile profileID: String?, of browser: InstalledBrowser) {
+        guard isOn && model.isBlocked(kind, browserID: browser.id) else {
+            model.settings.automation[browser.id, default: BrowserAutomation()].set(kind, isOn, inProfile: profileID)
+            return
+        }
+        let isFirst = awaitingAccess[browser.id] == nil
+        awaitingAccess[browser.id, default: []].append((kind, profileID))
+        guard isFirst else { return }
+        // Ask for the folders outside the toggle's action, once it has changed every profile and kind of data; each
+        // option turns on once its access is allowed.
         Task {
-            model.ensureAccess(blocked, for: browser)
-            for kind in blocked where !model.isBlocked(kind, browserID: browser.id) {
-                model.settings.automation[browser.id, default: BrowserAutomation()][kind] = true
+            let options = awaitingAccess.removeValue(forKey: browser.id) ?? []
+            model.ensureAccess(DataKind.allCases.filter { kind in options.contains { $0.kind == kind } }, for: browser)
+            for option in options where !model.isBlocked(option.kind, browserID: browser.id) {
+                model.settings.automation[browser.id, default: BrowserAutomation()].set(option.kind, true, inProfile: option.profileID)
             }
         }
     }

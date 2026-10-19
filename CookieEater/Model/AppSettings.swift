@@ -1,29 +1,30 @@
 import Foundation
 
-/// What automatic cleanups remove from one browser.
-struct BrowserAutomation: Codable, Equatable, Sendable {
+/// What automatic cleanups remove from one profile.
+struct ProfileAutomation: Codable, Equatable, Sendable {
+    static let nothing = ProfileAutomation(cookies: false, history: false, cache: false)
+
     var cookies = true
     var history = false
     var cache = false
-    /// `BrowserProfile.id`s of profiles that are left alone. Profiles added later are cleaned.
-    var skippedProfiles: Set<String> = []
 
     init() {}
 
+    init(cookies: Bool, history: Bool, cache: Bool) {
+        self.cookies = cookies
+        self.history = history
+        self.cache = cache
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let defaults = BrowserAutomation()
+        let defaults = ProfileAutomation()
         cookies = try container.decodeIfPresent(Bool.self, forKey: .cookies) ?? defaults.cookies
         history = try container.decodeIfPresent(Bool.self, forKey: .history) ?? defaults.history
         cache = try container.decodeIfPresent(Bool.self, forKey: .cache) ?? defaults.cache
-        skippedProfiles = try container.decodeIfPresent(Set<String>.self, forKey: .skippedProfiles) ?? defaults.skippedProfiles
     }
 
     var isActive: Bool { cookies || history || cache }
-
-    func cleans(_ profile: BrowserProfile) -> Bool {
-        !skippedProfiles.contains(profile.id)
-    }
 
     subscript(kind: DataKind) -> Bool {
         get {
@@ -38,6 +39,49 @@ struct BrowserAutomation: Codable, Equatable, Sendable {
             case .cookies: cookies = newValue
             case .history: history = newValue
             case .cache: cache = newValue
+            }
+        }
+    }
+}
+
+/// What automatic cleanups remove from each of one browser's profiles.
+struct BrowserAutomation: Codable, Equatable, Sendable {
+    /// What is removed from profiles that have no options of their own, such as profiles added later.
+    var defaults = ProfileAutomation()
+    /// Keyed by `BrowserProfile.id`.
+    var profiles: [String: ProfileAutomation] = [:]
+
+    private enum LegacyCodingKeys: String, CodingKey {
+        case skippedProfiles
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Before each profile had its own options, the browser's were kept at the top level, and profiles could only
+        // be left alone.
+        defaults = try container.decodeIfPresent(ProfileAutomation.self, forKey: .defaults) ?? ProfileAutomation(from: decoder)
+        profiles = try container.decodeIfPresent([String: ProfileAutomation].self, forKey: .profiles) ?? [:]
+        let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+        for profileID in try legacy.decodeIfPresent(Set<String>.self, forKey: .skippedProfiles) ?? [] {
+            profiles[profileID] = .nothing
+        }
+    }
+
+    subscript(profile: BrowserProfile) -> ProfileAutomation {
+        profiles[profile.id] ?? defaults
+    }
+
+    /// Turns this kind of data on or off in one profile, or in every profile, including ones added later, when
+    /// `profileID` is nil.
+    mutating func set(_ kind: DataKind, _ isOn: Bool, inProfile profileID: String?) {
+        if let profileID {
+            profiles[profileID, default: defaults][kind] = isOn
+        } else {
+            defaults[kind] = isOn
+            for id in profiles.keys {
+                profiles[id]?[kind] = isOn
             }
         }
     }

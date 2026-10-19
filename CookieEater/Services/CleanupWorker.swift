@@ -4,11 +4,17 @@ import Foundation
 struct CleanupRequest: Sendable {
     let browser: BrowserDefinition
     let profiles: [BrowserProfile]
-    /// Profiles in `profiles` whose data is left alone. They stay listed so cache folders that profiles share are
-    /// attributed correctly.
-    var skippedProfileIDs: Set<String> = []
+    /// Profiles in `profiles` whose data of each kind is left alone. They stay listed so cache folders that profiles
+    /// share are attributed correctly.
+    var skippedProfileIDs: [DataKind: Set<String>] = [:]
     /// Which items to remove, for each kind of data to clean. Kinds that are missing are left alone.
     var removals: [DataKind: @Sendable (any SiteData) -> Bool] = [:]
+
+    /// The profiles whose data of this kind is cleaned.
+    func profiles(cleaning kind: DataKind) -> [BrowserProfile] {
+        let skipped = skippedProfileIDs[kind] ?? []
+        return profiles.filter { !skipped.contains($0.id) }
+    }
 }
 
 struct CleanupReport: Sendable {
@@ -49,23 +55,22 @@ actor CleanupWorker {
         }
 
         // Skipped profiles aren't touched at all: even removing nothing from an empty history clears derived files.
-        let skipped = request.skippedProfileIDs
-        let profiles = request.profiles.filter { !skipped.contains($0.id) }
         if let shouldRemove = request.removals[.cookies] {
-            for profile in profiles where profile.cookiesFile != nil {
+            for profile in request.profiles(cleaning: .cookies) where profile.cookiesFile != nil {
                 attempt("Cookies", profile: profile) {
                     report.cookiesRemoved += try engine.removeCookies(in: profile) { shouldRemove($0) }
                 }
             }
         }
         if let shouldRemove = request.removals[.history] {
-            for profile in profiles where profile.historyFile != nil {
+            for profile in request.profiles(cleaning: .history) where profile.historyFile != nil {
                 attempt("History", profile: profile) {
                     report.historyItemsRemoved += try engine.removeHistory(in: profile) { shouldRemove($0) }
                 }
             }
         }
         if let shouldRemove = request.removals[.cache] {
+            let skipped = request.skippedProfileIDs[.cache] ?? []
             attempt("Cache") {
                 report.cacheBytesFreed += try removeCache(of: engine, profiles: request.profiles) {
                     !skipped.contains($0.profileID) && shouldRemove($0)

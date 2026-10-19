@@ -155,8 +155,8 @@ final class AppModel {
 
     var hasAutomaticCleanups: Bool {
         browsers.contains { browser in
-            let options = settings.automation(for: browser.id)
-            return options.isActive && browser.profiles.contains(where: options.cleans)
+            let automation = settings.automation(for: browser.id)
+            return browser.profiles.contains { automation[$0].isActive }
         }
     }
 
@@ -438,8 +438,7 @@ final class AppModel {
     private func cleanRequest(for browser: InstalledBrowser, profileID: String?) -> CleanupRequest? {
         // When cleaning one profile, the others' files aren't touched.
         let otherProfiles = profileID == nil ? [] : Set(browser.profiles.map(\.id).filter { $0 != profileID })
-        var request = CleanupRequest(browser: browser.definition, profiles: browser.profiles,
-                                     skippedProfileIDs: otherProfiles)
+        var request = CleanupRequest(browser: browser.definition, profiles: browser.profiles)
         for kind in DataKind.allCases {
             let exceptions = exceptionList(for: kind)
             let shouldRemove: @Sendable (any SiteData) -> Bool = { item in
@@ -449,6 +448,7 @@ final class AppModel {
             // browser keeps locked can't be checked, so it's included.
             if isLocked(kind, browserID: browser.id) || items(kind).contains(where: { $0.browserID == browser.id && shouldRemove($0) }) {
                 request.removals[kind] = shouldRemove
+                request.skippedProfileIDs[kind] = otherProfiles
             }
         }
         return request.removals.isEmpty ? nil : request
@@ -578,14 +578,15 @@ final class AppModel {
     }
 
     private func automaticRequest(for browser: InstalledBrowser) -> CleanupRequest? {
-        let options = settings.automation(for: browser.id)
-        guard browser.profiles.contains(where: options.cleans) else { return nil }
-        var request = CleanupRequest(browser: browser.definition, profiles: browser.profiles,
-                                     skippedProfileIDs: options.skippedProfiles)
+        let automation = settings.automation(for: browser.id)
+        var request = CleanupRequest(browser: browser.definition, profiles: browser.profiles)
         // Data the user hasn't allowed CookieEater to open is skipped.
-        for kind in DataKind.allCases where options[kind] && !isBlocked(kind, browserID: browser.id) {
+        for kind in DataKind.allCases where !isBlocked(kind, browserID: browser.id) {
+            let skipped = Set(browser.profiles.filter { !automation[$0][kind] }.map(\.id))
+            guard skipped.count < browser.profiles.count else { continue }
             let exceptions = exceptionList(for: kind)
             request.removals[kind] = { !exceptions.covers($0.host) }
+            request.skippedProfileIDs[kind] = skipped
         }
         return request.removals.isEmpty ? nil : request
     }
