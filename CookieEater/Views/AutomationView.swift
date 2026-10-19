@@ -3,6 +3,8 @@ import SwiftUI
 
 struct AutomationView: View {
     private static let disclosureWidth: CGFloat = 12
+    /// The choices for how often auto sync reads the data again, in seconds.
+    private static let autoSyncIntervals = [5, 10, 15, 30, 60, 120, 300]
 
     @Environment(AppModel.self) private var model
     /// Browsers whose profiles are shown.
@@ -72,6 +74,19 @@ struct AutomationView: View {
                 }
             } header: {
                 Text("What to Clean")
+            }
+
+            Section {
+                Picker("Sync every", selection: $model.settings.autoSyncSeconds) {
+                    ForEach(Self.autoSyncIntervals, id: \.self) { seconds in
+                        Text(Duration.seconds(seconds).formatted(.units(allowed: [.minutes, .seconds], width: .wide)))
+                            .tag(seconds)
+                    }
+                }
+            } header: {
+                Text("Auto Sync")
+            } footer: {
+                Text("Turn on auto sync for a browser, or for all browsers, with the button in the toolbar above their data. It only runs while this window is open.")
             }
 
             Section {

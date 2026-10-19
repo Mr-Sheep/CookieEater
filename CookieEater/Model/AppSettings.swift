@@ -94,6 +94,12 @@ struct AppSettings: Codable, Equatable, Sendable {
     var schedule = CleanupSchedule()
     var lastScheduledRun: Date?
     var showWindowAtLaunch = true
+    /// Whether every browser's data is read again regularly while the window is open.
+    var autoSyncsAllBrowsers = false
+    /// `BrowserDefinition.id`s of browsers whose data is read again regularly while the window is open.
+    var autoSyncedBrowsers: Set<String> = []
+    /// How often auto sync reads the data again.
+    var autoSyncSeconds = 15
 
     init() {}
 
@@ -109,6 +115,9 @@ struct AppSettings: Codable, Equatable, Sendable {
         schedule = try container.decodeIfPresent(CleanupSchedule.self, forKey: .schedule) ?? defaults.schedule
         lastScheduledRun = try container.decodeIfPresent(Date.self, forKey: .lastScheduledRun)
         showWindowAtLaunch = try container.decodeIfPresent(Bool.self, forKey: .showWindowAtLaunch) ?? defaults.showWindowAtLaunch
+        autoSyncsAllBrowsers = try container.decodeIfPresent(Bool.self, forKey: .autoSyncsAllBrowsers) ?? defaults.autoSyncsAllBrowsers
+        autoSyncedBrowsers = try container.decodeIfPresent(Set<String>.self, forKey: .autoSyncedBrowsers) ?? defaults.autoSyncedBrowsers
+        autoSyncSeconds = try container.decodeIfPresent(Int.self, forKey: .autoSyncSeconds) ?? defaults.autoSyncSeconds
     }
 
     func automation(for browserID: String) -> BrowserAutomation {

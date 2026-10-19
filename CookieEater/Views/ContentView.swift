@@ -64,6 +64,11 @@ struct ContentView: View {
         .onDisappear {
             NSApp.setActivationPolicy(.accessory)
         }
+        .task(id: model.settings.autoSyncSeconds) {
+            // Auto sync only runs while the window is open. It restarts when the interval changes, so a shorter one
+            // applies straight away.
+            await model.autoSync()
+        }
     }
 
     @ViewBuilder

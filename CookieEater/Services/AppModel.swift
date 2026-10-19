@@ -32,8 +32,8 @@ final class AppModel {
     private(set) var cache: [CacheEntry] = []
     /// Data still being read. Cookies are read first, then history, then the cache.
     private(set) var loadingKinds: Set<DataKind> = []
-    /// What couldn't be read, by kind of data.
-    private(set) var problems: [DataKind: [String]] = [:]
+    /// What couldn't be read, by kind of data and browser ID.
+    private var problemsByBrowser: [DataKind: [String: [String]]] = [:]
     private(set) var cleanupsInProgress = 0
     private(set) var runningBrowserIDs: Set<String> = []
     /// Browsers whose scheduled cleanup is waiting for them to quit.
@@ -55,6 +55,7 @@ final class AppModel {
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var scheduleTimer: Timer?
     @ObservationIgnored private var reloadGeneration = 0
+    @ObservationIgnored private var isSyncing = false
 
     init() {
         settings = SettingsStore.loadSettings()
@@ -69,6 +70,11 @@ final class AppModel {
     // MARK: - Queries
 
     var isLoading: Bool { !loadingKinds.isEmpty }
+
+    /// What couldn't be read, from every browser that isn't excluded.
+    func problems(_ kind: DataKind) -> [String] {
+        browsers.flatMap { problemsByBrowser[kind]?[$0.id] ?? [] }
+    }
 
     func exceptionList(for kind: DataKind) -> ExceptionList {
         ExceptionList(settings[exceptionsFor: kind])
@@ -150,6 +156,32 @@ final class AppModel {
             schedule.anchor = .now
             settings.schedule = schedule
         }
+    }
+
+    /// Whether auto sync keeps this browser's data, or every browser's, up to date.
+    func autoSyncs(_ scope: BrowserScope) -> Bool {
+        switch scope {
+        case .allBrowsers: settings.autoSyncsAllBrowsers
+        case .browser(let id): settings.autoSyncsAllBrowsers || settings.autoSyncedBrowsers.contains(id)
+        }
+    }
+
+    func setAutoSync(_ isOn: Bool, for scope: BrowserScope) {
+        switch scope {
+        case .allBrowsers:
+            settings.autoSyncsAllBrowsers = isOn
+        case .browser(let id) where isOn:
+            settings.autoSyncedBrowsers.insert(id)
+        case .browser(let id):
+            settings.autoSyncedBrowsers.remove(id)
+        }
+        if isOn {
+            Task { await sync(Set(browsers(in: scope).map(\.id))) }
+        }
+    }
+
+    private var autoSyncedBrowserIDs: Set<String> {
+        settings.autoSyncsAllBrowsers ? Set(browsers.map(\.id)) : settings.autoSyncedBrowsers
     }
 
     func addExceptions(_ domains: some Sequence<String>, for kind: DataKind) {
@@ -278,7 +310,7 @@ final class AppModel {
         guard generation == reloadGeneration else { return }
         installedBrowsers = scan.browsers
         cookies = scan.cookies
-        problems[.cookies] = scan.problems
+        problemsByBrowser[.cookies] = scan.problems
         refreshAccess()
         loadingKinds.remove(.cookies)
 
@@ -286,13 +318,60 @@ final class AppModel {
         let history = await Task.detached(priority: .utility) { BrowserScan.history(of: included) }.value
         guard generation == reloadGeneration else { return }
         self.history = history.pages
-        problems[.history] = history.problems
+        problemsByBrowser[.history] = history.problems
         loadingKinds.remove(.history)
 
         let cache = await Task.detached(priority: .utility) { BrowserScan.cache(of: included) }.value
         guard generation == reloadGeneration else { return }
         self.cache = cache
         loadingKinds.remove(.cache)
+    }
+
+    /// Keeps the data of the browsers with auto sync turned on up to date, until the task is cancelled.
+    func autoSync() async {
+        while !Task.isCancelled {
+            await sync(autoSyncedBrowserIDs)
+            try? await Task.sleep(for: .seconds(max(settings.autoSyncSeconds, 1)))
+        }
+    }
+
+    /// Reads these browsers' data again without showing progress, and replaces only theirs. Skipped while a reload
+    /// or a cleanup is under way, since both end by showing newer data.
+    private func sync(_ browserIDs: Set<String>) async {
+        let targets = browsers.filter { browserIDs.contains($0.id) }.map(\.definition)
+        guard !targets.isEmpty, !isLoading, !isSyncing, cleanupsInProgress == 0 else { return }
+        isSyncing = true
+        defer { isSyncing = false }
+        let generation = reloadGeneration
+        let read = await Task.detached(priority: .utility) { targets.compactMap(BrowserScan.snapshot(of:)) }.value
+        guard generation == reloadGeneration, cleanupsInProgress == 0 else { return }
+
+        let ids = Set(targets.map(\.id))
+        let snapshots = Dictionary(uniqueKeysWithValues: read.map { ($0.browser.id, $0) })
+        set(\.installedBrowsers, to: installedBrowsers.map { snapshots[$0.id]?.browser ?? $0 })
+        set(\.cookies, to: replacing(cookies, of: ids) { snapshots[$0]?.cookies ?? [] })
+        set(\.history, to: replacing(history, of: ids) { snapshots[$0]?.history ?? [] })
+        set(\.cache, to: replacing(cache, of: ids) { snapshots[$0]?.cache ?? [] })
+        var problems = problemsByBrowser
+        for kind in DataKind.allCases {
+            for id in ids {
+                problems[kind, default: [:]][id] = snapshots[id]?.problems[kind]
+            }
+        }
+        set(\.problemsByBrowser, to: problems)
+    }
+
+    /// `items` with these browsers' items swapped for newly read ones. Browsers keep the order they're listed in.
+    private func replacing<Item: SiteData>(_ items: [Item], of ids: Set<String>, with newItems: (String) -> [Item]) -> [Item] {
+        let current = Dictionary(grouping: items, by: \.browserID)
+        return installedBrowsers.flatMap { ids.contains($0.id) ? newItems($0.id) : current[$0.id] ?? [] }
+    }
+
+    /// Sets a property only when its value changes, so a sync that finds nothing new doesn't redraw the tables.
+    private func set<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<AppModel, Value>, to value: Value) {
+        if self[keyPath: keyPath] != value {
+            self[keyPath: keyPath] = value
+        }
     }
 
     // MARK: - Manual removal

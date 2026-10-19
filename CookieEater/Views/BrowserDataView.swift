@@ -123,6 +123,15 @@ struct SiteDataView<Details: SiteDataTable>: View {
 
     private var noun: String { kind.title.lowercased() }
 
+    private var autoSyncHelp: String {
+        if let browser {
+            model.settings.autoSyncsAllBrowsers ? "Auto sync is on for all browsers"
+                : "Keep \(browser.name)'s data up to date while this window is open"
+        } else {
+            "Keep every browser's data up to date while this window is open"
+        }
+    }
+
     var body: some View {
         let scoped = scopedItems
         let groups = visibleGroups(from: scoped)
@@ -155,6 +164,12 @@ struct SiteDataView<Details: SiteDataTable>: View {
                     Task { await model.reload() }
                 }
                 .disabled(model.isLoading)
+            }
+            ToolbarItem {
+                Toggle("Auto Sync", systemImage: "arrow.triangle.2.circlepath",
+                       isOn: Binding { model.autoSyncs(scope) } set: { model.setAutoSync($0, for: scope) })
+                    .disabled(scope != .allBrowsers && model.settings.autoSyncsAllBrowsers)
+                    .help(autoSyncHelp)
             }
         }
         .onChange(of: selectedSites) {
@@ -267,14 +282,15 @@ struct SiteDataView<Details: SiteDataTable>: View {
     }
 
     private func actionBar(siteCount: Int, items: [Details.Item]) -> some View {
-        HStack(spacing: 8) {
+        let problems = model.problems(kind)
+        return HStack(spacing: 8) {
             Text(summary(siteCount: siteCount, items: items))
                 .foregroundStyle(.secondary)
             if model.loadingKinds.contains(kind) || model.cleanupsInProgress > 0 {
                 ProgressView()
                     .controlSize(.small)
             }
-            if let problems = model.problems[kind], !problems.isEmpty {
+            if !problems.isEmpty {
                 Button {
                     showsProblems = true
                 } label: {
