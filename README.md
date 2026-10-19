@@ -62,9 +62,11 @@ Settings, the activity log and folder bookmarks are stored as JSON in `~/Library
 
 ### Security and Privacy
 
+- The only connection made by CookieEater is to check for updates, you can disabe it in the settings
 - Cookie values aren't decoded while listing, only when you export them. Chromium encrypts its values with a password it keeps in your keychain (e.g. "Chrome Safe Storage"), so the first copy from a Chromium browser makes macOS ask whether CookieEater may use that password.
 - Copied values are marked as concealed and transient so clipboard managers leave them out, aren't sent to your other devices through Universal Clipboard, and are cleared from the clipboard after 90 seconds unless you've copied something else since.
 - Private windows keep their data in memory, not in the files listed above, so they never show up in CookieEater, and can't be removed by CookieEater. (see [Mozilla's FAQ](https://support.mozilla.org/en-US/kb/private-browsing-use-firefox-without-history), [Apple's](https://support.apple.com/guide/safari/browse-privately-ibrw1069/mac), [Chrome's](https://support.google.com/chrome/answer/95464?hl=en&visit_id=639279762168181026-3686844855&rd=1))
+- Chromium browsers locks their database, so realtime syncing will not work unless CookieEater makes a temporary copy. You can disable this in the settings. When disabled, CookieEater will attempt to read it after it has been closed.
 
 
 ### Limitations
