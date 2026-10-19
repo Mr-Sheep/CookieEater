@@ -57,6 +57,15 @@ struct BrowserDefinition: Identifiable, Hashable, Sendable {
         cachePaths.map { URL.homeDirectory.appending(path: $0, directoryHint: .isDirectory) }
     }
 
+    /// Chromium keeps its cookie and history databases locked while it's open, so other apps can only read them
+    /// through a copy until it quits.
+    var locksDatabasesWhileOpen: Bool { family == .chromium }
+
+    /// How this browser's databases are read: the way the user chose for Chromium, otherwise in place.
+    func databaseReading(chromium: DatabaseReading) -> DatabaseReading {
+        locksDatabasesWhileOpen ? chromium : .inPlace
+    }
+
     /// Folders macOS protects, which CookieEater can open only once the user allows each one.
     /// Only Safari's data is protected. Its data folder holds the cookies of every profile.
     func protectedFolders(for kind: DataKind) -> [URL] {

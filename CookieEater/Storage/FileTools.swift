@@ -165,6 +165,26 @@ enum FileTools {
         return try body(SQLiteDatabase(url: copy))
     }
 
+    /// Reads an SQLite database in place or through a copy.
+    static func readSQLite<T>(_ url: URL, _ reading: DatabaseReading, _ body: (SQLiteDatabase) throws -> T) throws -> T {
+        switch reading {
+        case .inPlace: try readSQLiteInPlace(url, body)
+        case .copy: try readSQLiteSnapshot(url, body)
+        }
+    }
+
+    /// Reads an SQLite database where it is, read-only, without changing it or adding files next to it. Not for a
+    /// database its browser keeps locked while it's open.
+    ///
+    /// While a browser has a database open in WAL mode, its `-wal` and `-shm` files let readers work alongside it.
+    /// Without them, as browsers leave a database they've closed, and for databases that aren't in WAL mode, it is
+    /// opened as immutable: without locks, so a browser that opens it meanwhile is never kept out.
+    static func readSQLiteInPlace<T>(_ url: URL, _ body: (SQLiteDatabase) throws -> T) throws -> T {
+        let path = url.path(percentEncoded: false)
+        let isShared = exists(URL(filePath: path + "-wal")) && exists(URL(filePath: path + "-shm"))
+        return try body(SQLiteDatabase(url: url, mode: isShared ? .readOnly : .immutable))
+    }
+
     /// Deletes the snapshots left behind when CookieEater quit in the middle of a read, e.g. after a crash.
     static func removeLeftoverSnapshots() {
         for folder in children(of: FileManager.default.temporaryDirectory) {

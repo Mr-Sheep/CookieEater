@@ -43,9 +43,9 @@ struct FirefoxEngine: BrowserEngine {
         return profiles
     }
 
-    func cookies(in profile: BrowserProfile) throws -> [BrowserCookie] {
+    func cookies(in profile: BrowserProfile, reading: DatabaseReading) throws -> [BrowserCookie] {
         guard let url = profile.cookiesFile else { return [] }
-        return try FileTools.readSQLiteSnapshot(url) { db in
+        return try FileTools.readSQLite(url, reading) { db in
             var cookies: [BrowserCookie] = []
             try forEachCookie(in: db, profile: profile) { _, cookie in cookies.append(cookie) }
             return cookies
@@ -68,10 +68,10 @@ struct FirefoxEngine: BrowserEngine {
         return ids.count
     }
 
-    func cookieValues(of cookies: [BrowserCookie], in profile: BrowserProfile) throws -> [String: String] {
+    func cookieValues(of cookies: [BrowserCookie], in profile: BrowserProfile, reading: DatabaseReading) throws -> [String: String] {
         guard let url = profile.cookiesFile else { return [:] }
         let wanted = Set(cookies.map(\.id))
-        return try FileTools.readSQLiteSnapshot(url) { db in
+        return try FileTools.readSQLite(url, reading) { db in
             var values: [String: String] = [:]
             try forEachCookie(in: db, profile: profile) { id, cookie in
                 guard wanted.contains(cookie.id) else { return }
@@ -81,9 +81,9 @@ struct FirefoxEngine: BrowserEngine {
         }
     }
 
-    func history(in profile: BrowserProfile) throws -> [HistoryEntry] {
+    func history(in profile: BrowserProfile, reading: DatabaseReading) throws -> [HistoryEntry] {
         guard let url = profile.historyFile else { return [] }
-        return try FileTools.readSQLiteSnapshot(url) { db in
+        return try FileTools.readSQLite(url, reading) { db in
             var pages: [HistoryEntry] = []
             try forEachPage(in: db, profile: profile) { _, page in pages.append(page) }
             return pages

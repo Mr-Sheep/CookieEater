@@ -35,13 +35,25 @@ final class SQLiteDatabase {
         }
     }
 
+    enum Mode {
+        case readWrite
+        case readOnly
+        /// Read-only and without locks, for a database nothing writes to while it's open.
+        case immutable
+    }
+
     let url: URL
     private let handle: OpaquePointer
 
-    init(url: URL, readOnly: Bool = false) throws {
+    init(url: URL, mode: Mode = .readWrite) throws {
         var db: OpaquePointer?
-        let flags = readOnly ? SQLITE_OPEN_READONLY : SQLITE_OPEN_READWRITE
-        let status = sqlite3_open_v2(url.path(percentEncoded: false), &db, flags, nil)
+        let (name, flags) = switch mode {
+        case .readWrite: (url.path(percentEncoded: false), SQLITE_OPEN_READWRITE)
+        case .readOnly: (url.path(percentEncoded: false), SQLITE_OPEN_READONLY)
+        // SQLite expects a URI to be percent-encoded, as `absoluteString` is.
+        case .immutable: (url.absoluteString + "?immutable=1", SQLITE_OPEN_READONLY | SQLITE_OPEN_URI)
+        }
+        let status = sqlite3_open_v2(name, &db, flags, nil)
         guard status == SQLITE_OK, let db else {
             let reason = db.map { String(cString: sqlite3_errmsg($0)) } ?? "error \(status)"
             sqlite3_close(db)

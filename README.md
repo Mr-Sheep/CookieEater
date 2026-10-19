@@ -8,7 +8,6 @@ A macOS app written in Swift that inspect/manage browser cookies/histories/cache
 - **Automation:** clean when a browser quits, on a schedule, or both. You choose what is cleaned (cookies, history, cache) for each browser. 
 - **Browser Profiles Support**: pick the profile you want to manage
 
-
 ## Supported browsers
 
 | Engine | Browsers |
@@ -50,7 +49,10 @@ Requires macOS 15 or later.
 | History | `History.db` (`history_items`, `history_visits`) + recently closed tabs | `History` SQLite tables + derived files (Visited Links, Top Sites, Shortcuts) | `places.sqlite`: visits and unbookmarked pages; bookmarks are kept |
 | Cache | WebKit cache records in `~/Library/Caches/com.apple.Safari` and the container's cache | "Simple" cache entries in `<profile>/Cache/Cache_Data` + GPU/shader caches | `cache2` entries in `~/Library/Caches/<browser>/Profiles/*` |
 
-- **Reading** cookies and history happens through a private copy of each database, so it works while the browser is open and never touches the original. Each copy is deleted as soon as it has been read, and copies left behind by a crash are deleted at the next launch. The cache is read in place: only the part of each entry that holds its URL and site is read, never the cached content.
+- **Reading** never changes the browser's files. Firefox's and Safari's databases are read in place, read-only, even while the browser is open, so Safari's data never leaves the folders macOS protects. Chromium-based browsers keep their databases locked while they're open, so Settings › Browsers offers two ways to read them:
+  - **From a temporary copy** (the default): each database is copied to the temporary folder and read there, so it can be read while the browser is open. Each copy is deleted as soon as it has been read, and copies left behind by a crash are deleted at the next launch.
+  - **In place**: each database is read where it is, once the browser quits.
+- The cache is read in place: only the part of each entry that holds its URL and site is read, never the cached content.
 - **Sites** for the cache are the top-level site a resource was loaded for, when the browser partitions its cache by site (all three do by default), otherwise the resource's own site.
 - **Removing** only happens while the browser is closed, because browsers keep this data in memory and would write it back. If you remove something from an open browser, CookieEater offers to quit it first.
 - **Automatic cleanups** wait a few seconds after a browser quits so it can finish writing its files.
@@ -58,11 +60,12 @@ Requires macOS 15 or later.
 
 Settings, the activity log and folder bookmarks are stored as JSON in `~/Library/Application Support/CookieEater/`.
 
-### Security
+### Security and Privacy
 
 - Cookie values aren't decoded while listing, only when you export them. Chromium encrypts its values with a password it keeps in your keychain (e.g. "Chrome Safe Storage"), so the first copy from a Chromium browser makes macOS ask whether CookieEater may use that password.
 - Copied values are marked as concealed and transient so clipboard managers leave them out, aren't sent to your other devices through Universal Clipboard, and are cleared from the clipboard after 90 seconds unless you've copied something else since.
 - Private windows keep their data in memory, not in the files listed above, so they never show up in CookieEater, and can't be removed by CookieEater. (see [Mozilla's FAQ](https://support.mozilla.org/en-US/kb/private-browsing-use-firefox-without-history), [Apple's](https://support.apple.com/guide/safari/browse-privately-ibrw1069/mac), [Chrome's](https://support.google.com/chrome/answer/95464?hl=en&visit_id=639279762168181026-3686844855&rd=1))
+
 
 ### Limitations
 

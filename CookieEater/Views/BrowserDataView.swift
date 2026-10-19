@@ -18,6 +18,10 @@ struct BrowserDataView: View {
                 FolderAccessBanner(browser: browser)
                 Divider()
             }
+            ForEach(model.browsers(in: scope).filter { !model.lockedKinds(browserID: $0.id).isEmpty }) { browser in
+                LockedDataBanner(browser: browser)
+                Divider()
+            }
             if let browser {
                 BrowserHeader(browser: browser, profileID: $profileID)
                 Divider()
@@ -262,6 +266,9 @@ struct SiteDataView<Details: SiteDataTable>: View {
             } actions: {
                 Button("Allow Access…") { model.ensureAccess([kind], for: browser) }
             }
+        } else if let browser, model.isLocked(kind, browserID: browser.id) {
+            ContentUnavailableView("\(browser.name) Is Open", systemImage: "lock",
+                                   description: Text("\(browser.name) keeps its \(noun) locked while it's open, so they're read once it quits."))
         } else if model.loadingKinds.contains(kind) {
             ProgressView("Reading \(noun)…")
         } else {
@@ -475,6 +482,9 @@ private struct BrowserHeader: View {
         if model.isBlocked(kind, browserID: browser.id) {
             return "\(kind.title): no access"
         }
+        if model.isLocked(kind, browserID: browser.id) {
+            return "\(kind.title): read when it quits"
+        }
         if model.loadingKinds.contains(kind) {
             return "Reading \(kind.title.lowercased())…"
         }
@@ -511,5 +521,30 @@ private struct FolderAccessBanner: View {
         }
         .padding(12)
         .background(.orange.opacity(0.08))
+    }
+}
+
+/// Shown while a browser keeps some of its data locked, which only happens when databases are read in place.
+private struct LockedDataBanner: View {
+    @Environment(AppModel.self) private var model
+    let browser: InstalledBrowser
+
+    var body: some View {
+        let locked = model.lockedKinds(browserID: browser.id)
+        HStack(spacing: 12) {
+            Image(systemName: "lock")
+                .font(.title2)
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(browser.name)'s \(locked.map { $0.title.lowercased() }.formatted(.list(type: .and))) will be read when it quits")
+                    .font(.headline)
+                Text("\(browser.name) keeps them locked while it's open. To read them now, have Chromium-based browsers read from a temporary copy in Settings › Browsers.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(.blue.opacity(0.08))
     }
 }

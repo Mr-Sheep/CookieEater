@@ -81,6 +81,21 @@ struct CleanupSchedule: Codable, Equatable, Sendable {
     }
 }
 
+/// How cookie and history databases are read. Only Chromium's are read the way the user chooses: Firefox and Safari
+/// don't lock theirs, so they're always read in place.
+enum DatabaseReading: String, Codable, Sendable {
+    /// Read-only, where they are. Chromium locks its databases while it's open, so its cookies and history are read
+    /// once it quits.
+    case inPlace
+    /// Through a copy in the temporary folder, deleted once it has been read. Works while any browser is open.
+    case copy
+
+    /// Whether this kind of data can't be read from this browser now.
+    func isLocked(_ kind: DataKind, of browser: BrowserDefinition, isRunning: Bool) -> Bool {
+        self == .inPlace && isRunning && browser.locksDatabasesWhileOpen && kind != .cache
+    }
+}
+
 struct AppSettings: Codable, Equatable, Sendable {
     /// Sites whose cookies are kept. The name predates the history and cache lists.
     var exceptions: [String] = []
@@ -100,6 +115,8 @@ struct AppSettings: Codable, Equatable, Sendable {
     var autoSyncedBrowsers: Set<String> = []
     /// How often auto sync reads the data again.
     var autoSyncSeconds = 15
+    /// How Chromium browsers' databases are read.
+    var chromiumReading = DatabaseReading.copy
 
     init() {}
 
@@ -118,6 +135,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         autoSyncsAllBrowsers = try container.decodeIfPresent(Bool.self, forKey: .autoSyncsAllBrowsers) ?? defaults.autoSyncsAllBrowsers
         autoSyncedBrowsers = try container.decodeIfPresent(Set<String>.self, forKey: .autoSyncedBrowsers) ?? defaults.autoSyncedBrowsers
         autoSyncSeconds = try container.decodeIfPresent(Int.self, forKey: .autoSyncSeconds) ?? defaults.autoSyncSeconds
+        chromiumReading = try container.decodeIfPresent(DatabaseReading.self, forKey: .chromiumReading) ?? defaults.chromiumReading
     }
 
     func automation(for browserID: String) -> BrowserAutomation {

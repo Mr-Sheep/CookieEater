@@ -34,8 +34,9 @@ struct SafariEngine: BrowserEngine {
         return profiles
     }
 
-    func cookies(in profile: BrowserProfile) throws -> [BrowserCookie] {
+    func cookies(in profile: BrowserProfile, reading: DatabaseReading) throws -> [BrowserCookie] {
         guard let url = profile.cookiesFile, FileTools.exists(url) else { return [] }
+        // Not a database: the file is read into memory, whichever way databases are read.
         return try BinaryCookieFile(data: Data(contentsOf: url)).records.map { cookie(from: $0, in: profile) }
     }
 
@@ -49,7 +50,7 @@ struct SafariEngine: BrowserEngine {
         return removed
     }
 
-    func cookieValues(of cookies: [BrowserCookie], in profile: BrowserProfile) throws -> [String: String] {
+    func cookieValues(of cookies: [BrowserCookie], in profile: BrowserProfile, reading: DatabaseReading) throws -> [String: String] {
         guard let url = profile.cookiesFile, FileTools.exists(url) else { return [:] }
         let wanted = Set(cookies.map(\.id))
         var values: [String: String] = [:]
@@ -62,9 +63,9 @@ struct SafariEngine: BrowserEngine {
         return values
     }
 
-    func history(in profile: BrowserProfile) throws -> [HistoryEntry] {
+    func history(in profile: BrowserProfile, reading: DatabaseReading) throws -> [HistoryEntry] {
         guard let url = profile.historyFile, FileTools.isNonEmptyFile(url) else { return [] }
-        return try FileTools.readSQLiteSnapshot(url) { db in
+        return try FileTools.readSQLite(url, reading) { db in
             var pages: [HistoryEntry] = []
             try forEachPage(in: db, profile: profile) { _, page in pages.append(page) }
             return pages
@@ -150,11 +151,12 @@ struct SafariEngine: BrowserEngine {
                       isHTTPOnly: record.isHTTPOnly)
     }
 
-    /// Profiles are listed in SafariTabs.db as top-level entries with subtype 2.
+    /// Profiles are listed in SafariTabs.db as top-level entries with subtype 2. It is read where it is: Safari doesn't
+    /// lock it, and a copy would take every open tab out of Safari's protected folder.
     private func namedProfiles() -> [(uuid: String, title: String)] {
         let tabs = library.appending(path: "\(historyLibrary.lastPathComponent)/SafariTabs.db")
         guard FileTools.isNonEmptyFile(tabs) else { return [] }
-        let profiles = try? FileTools.readSQLiteSnapshot(tabs) { db in
+        let profiles = try? FileTools.readSQLiteInPlace(tabs) { db in
             var result: [(uuid: String, title: String)] = []
             try db.forEachRow("SELECT external_uuid, title FROM bookmarks WHERE parent = 0 AND subtype = 2") { row in
                 let uuid = row.string(0)

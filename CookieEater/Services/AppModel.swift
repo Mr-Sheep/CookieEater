@@ -109,6 +109,17 @@ final class AppModel {
         DataKind.allCases.filter { isBlocked($0, browserID: browserID) }
     }
 
+    /// Whether this data isn't read because its browser is open and keeps it locked. Only happens when databases are
+    /// read in place.
+    func isLocked(_ kind: DataKind, browserID: String) -> Bool {
+        guard let browser = browser(withID: browserID) else { return false }
+        return settings.chromiumReading.isLocked(kind, of: browser.definition, isRunning: runningBrowserIDs.contains(browserID))
+    }
+
+    func lockedKinds(browserID: String) -> [DataKind] {
+        DataKind.allCases.filter { isLocked($0, browserID: browserID) }
+    }
+
     func browser(withID id: String) -> InstalledBrowser? {
         browsers.first { $0.id == id }
     }
@@ -204,6 +215,12 @@ final class AppModel {
         settings[exceptionsFor: kind].removeAll { exception in
             sites.contains { $0 == exception || $0.hasSuffix("." + exception) }
         }
+    }
+
+    func setChromiumReading(_ reading: DatabaseReading) {
+        guard reading != settings.chromiumReading else { return }
+        settings.chromiumReading = reading
+        Task { await reload() }
     }
 
     func setExcluded(_ excluded: Bool, browserID: String) {
@@ -309,7 +326,11 @@ final class AppModel {
         let generation = reloadGeneration
         loadingKinds = Set(DataKind.allCases)
         let excluded = settings.excludedBrowsers
-        let scan = await Task.detached(priority: .userInitiated) { BrowserScan.perform(excluding: excluded) }.value
+        let chromiumReading = settings.chromiumReading
+        let running = runningBrowserIDs
+        let scan = await Task.detached(priority: .userInitiated) {
+            BrowserScan.perform(excluding: excluded, chromiumReading: chromiumReading, running: running)
+        }.value
         guard generation == reloadGeneration else { return }
         installedBrowsers = scan.browsers
         cookies = scan.cookies
@@ -318,7 +339,9 @@ final class AppModel {
         loadingKinds.remove(.cookies)
 
         let included = browsers
-        let history = await Task.detached(priority: .utility) { BrowserScan.history(of: included) }.value
+        let history = await Task.detached(priority: .utility) {
+            BrowserScan.history(of: included, chromiumReading: chromiumReading, running: running)
+        }.value
         guard generation == reloadGeneration else { return }
         self.history = history.pages
         problemsByBrowser[.history] = history.problems
@@ -346,7 +369,11 @@ final class AppModel {
         isSyncing = true
         defer { isSyncing = false }
         let generation = reloadGeneration
-        let read = await Task.detached(priority: .utility) { targets.compactMap(BrowserScan.snapshot(of:)) }.value
+        let chromiumReading = settings.chromiumReading
+        let running = runningBrowserIDs
+        let read = await Task.detached(priority: .utility) {
+            targets.compactMap { BrowserScan.snapshot(of: $0, chromiumReading: chromiumReading, running: running) }
+        }.value
         guard generation == reloadGeneration, cleanupsInProgress == 0 else { return }
 
         let ids = Set(targets.map(\.id))
@@ -418,8 +445,9 @@ final class AppModel {
             let shouldRemove: @Sendable (any SiteData) -> Bool = { item in
                 (profileID == nil || item.profileID == profileID) && !exceptions.covers(item.host)
             }
-            // Kinds with nothing to remove are left out, so an open browser isn't quit for nothing.
-            if items(kind).contains(where: { $0.browserID == browser.id && shouldRemove($0) }) {
+            // Kinds with nothing to remove are left out, so an open browser isn't quit for nothing. Data the open
+            // browser keeps locked can't be checked, so it's included.
+            if isLocked(kind, browserID: browser.id) || items(kind).contains(where: { $0.browserID == browser.id && shouldRemove($0) }) {
                 request.removals[kind] = shouldRemove
             }
         }
@@ -431,6 +459,10 @@ final class AppModel {
     /// Puts cookies and their values on the clipboard for `clipboardLifetime`. This is the only place cookie values
     /// are read. Cookies that no longer exist are left out.
     func copy(_ cookies: [BrowserCookie], as format: CookieCopyFormat) async throws {
+        if let locked = Set(cookies.map(\.browserID)).first(where: { isLocked(.cookies, browserID: $0) }).flatMap(browser(withID:)) {
+            throw CookieValueError("\(locked.name) keeps its cookies locked while it's open. Quit it to copy their values, or have Chromium-based browsers read from a temporary copy in Settings › Browsers.")
+        }
+        let chromiumReading = settings.chromiumReading
         let sources = Dictionary(grouping: cookies, by: \.profileID).compactMap { profileID, cookies in
             browser(withID: cookies[0].browserID).flatMap { browser in
                 browser.profiles.first { $0.id == profileID }.map { (engine: browser.definition.makeEngine(), profile: $0, cookies: cookies) }
@@ -438,7 +470,8 @@ final class AppModel {
         }
         let values = try await Task.detached(priority: .userInitiated) {
             try sources.reduce(into: [String: String]()) { values, source in
-                values.merge(try source.engine.cookieValues(of: source.cookies, in: source.profile)) { $1 }
+                let reading = source.engine.browser.databaseReading(chromium: chromiumReading)
+                values.merge(try source.engine.cookieValues(of: source.cookies, in: source.profile, reading: reading)) { $1 }
             }
         }.value
         guard !values.isEmpty else {
@@ -600,6 +633,15 @@ final class AppModel {
         }
     }
 
+    private func applicationDidLaunch(bundleID: String?) {
+        refreshRunningBrowsers()
+        // What was read from a browser that now keeps its data locked would go stale, so it's read again without it.
+        if let bundleID, let browser = browsers.first(where: { $0.definition.bundleIDs.contains(bundleID) }),
+           !lockedKinds(browserID: browser.id).isEmpty {
+            Task { await reload() }
+        }
+    }
+
     private func checkSchedule() {
         guard let next = nextScheduledRun, next <= .now else { return }
         settings.lastScheduledRun = .now
@@ -631,8 +673,9 @@ final class AppModel {
             MainActor.assumeIsolated { self?.applicationDidTerminate(bundleID: bundleID) }
         })
         observers.append(workspace.addObserver(forName: NSWorkspace.didLaunchApplicationNotification,
-                                               object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshRunningBrowsers() }
+                                               object: nil, queue: .main) { [weak self] note in
+            let bundleID = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier
+            MainActor.assumeIsolated { self?.applicationDidLaunch(bundleID: bundleID) }
         })
         observers.append(workspace.addObserver(forName: NSWorkspace.didWakeNotification,
                                                object: nil, queue: .main) { [weak self] _ in

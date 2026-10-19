@@ -2,24 +2,25 @@ import Foundation
 
 /// Reads and removes one browser family's data.
 ///
-/// Reading works while the browser is open. Removing must only happen while it is closed:
+/// Reading works while the browser is open, except in place from a browser that locks its databases (see
+/// `BrowserDefinition.locksDatabasesWhileOpen`). Removing must only happen while it is closed:
 /// browsers keep this data in memory and would write it back.
 protocol BrowserEngine: Sendable {
     var browser: BrowserDefinition { get }
 
     func profiles() -> [BrowserProfile]
 
-    func cookies(in profile: BrowserProfile) throws -> [BrowserCookie]
+    func cookies(in profile: BrowserProfile, reading: DatabaseReading) throws -> [BrowserCookie]
 
     /// Returns the number of cookies removed.
     func removeCookies(in profile: BrowserProfile, where shouldRemove: (BrowserCookie) -> Bool) throws -> Int
 
     /// Reads the values of `cookies`, decrypting them if needed, keyed by cookie ID.
     /// Cookies that no longer exist are left out.
-    func cookieValues(of cookies: [BrowserCookie], in profile: BrowserProfile) throws -> [String: String]
+    func cookieValues(of cookies: [BrowserCookie], in profile: BrowserProfile, reading: DatabaseReading) throws -> [String: String]
 
     /// The pages in the profile's history.
-    func history(in profile: BrowserProfile) throws -> [HistoryEntry]
+    func history(in profile: BrowserProfile, reading: DatabaseReading) throws -> [HistoryEntry]
 
     /// Returns the number of pages removed. Removing every page also deletes the files the browser derives
     /// from its history.
