@@ -42,6 +42,7 @@ struct AutomationView: View {
                             Text("Cookies")
                             Text("History")
                             Text("Cache")
+                            Text("All")
                         }
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -55,14 +56,13 @@ struct AutomationView: View {
                                 automationToggle("Cookies", browser, .cookies)
                                 automationToggle("History", browser, .history)
                                 automationToggle("Cache", browser, .cache)
+                                allAutomationToggle(browser)
                             }
                         }
                     }
                 }
             } header: {
                 Text("What to Clean")
-            } footer: {
-                Text("Sites on the exception lists keep that kind of data. Excluded browsers are never cleaned.")
             }
 
             Section {
@@ -107,21 +107,42 @@ struct AutomationView: View {
 
     private func automationToggle(_ title: String, _ browser: InstalledBrowser, _ kind: DataKind) -> some View {
         Toggle(title, isOn: Binding {
-            // Data CookieEater isn't allowed to open is never cleaned, so it shows as off.
-            model.settings.automation(for: browser.id)[kind] && !model.isBlocked(kind, browserID: browser.id)
+            isAutomated(kind, browser)
         } set: { isOn in
-            guard isOn, model.isBlocked(kind, browserID: browser.id) else {
-                model.settings.automation[browser.id, default: BrowserAutomation()][kind] = isOn
-                return
-            }
-            // Ask for the folder outside the toggle's action; the checkbox turns on once access is allowed.
-            Task {
-                if model.ensureAccess([kind], for: browser) {
-                    model.settings.automation[browser.id, default: BrowserAutomation()][kind] = true
-                }
-            }
+            setAutomation([kind], isOn, for: browser)
         })
         .toggleStyle(.checkbox)
         .labelsHidden()
+    }
+
+    /// Turns every kind of data on when any of them is off, and all of them off when they're all on.
+    private func allAutomationToggle(_ browser: InstalledBrowser) -> some View {
+        Toggle("All", isOn: Binding {
+            DataKind.allCases.allSatisfy { isAutomated($0, browser) }
+        } set: { isOn in
+            setAutomation(DataKind.allCases, isOn, for: browser)
+        })
+        .toggleStyle(.checkbox)
+        .labelsHidden()
+    }
+
+    private func isAutomated(_ kind: DataKind, _ browser: InstalledBrowser) -> Bool {
+        // Data CookieEater isn't allowed to open is never cleaned, so it shows as off.
+        model.settings.automation(for: browser.id)[kind] && !model.isBlocked(kind, browserID: browser.id)
+    }
+
+    private func setAutomation(_ kinds: [DataKind], _ isOn: Bool, for browser: InstalledBrowser) {
+        let blocked = isOn ? kinds.filter { model.isBlocked($0, browserID: browser.id) } : []
+        for kind in kinds where !blocked.contains(kind) {
+            model.settings.automation[browser.id, default: BrowserAutomation()][kind] = isOn
+        }
+        guard !blocked.isEmpty else { return }
+        // Ask for the folders outside the toggle's action; each checkbox turns on once its access is allowed.
+        Task {
+            model.ensureAccess(blocked, for: browser)
+            for kind in blocked where !model.isBlocked(kind, browserID: browser.id) {
+                model.settings.automation[browser.id, default: BrowserAutomation()][kind] = true
+            }
+        }
     }
 }
